@@ -1,6 +1,5 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { getFirstName } from "../first-name";
 import { buildEditUrl, buildFooterLinks } from "../site-url";
 import type { FooterLinks } from "../components/Footer";
 
@@ -40,7 +39,7 @@ export async function buildConfirmationEmailData(
 
   return {
     subject: `Your Shokakko Australia pre-order — ${order.orderNumber}`,
-    firstName: getFirstName(order.customerName),
+    firstName: order.customerFirstName,
     orderNumber: order.orderNumber,
     items: order.items.map((item) => ({
       name: item.productName,

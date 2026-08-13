@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Logo } from "@/components/Logo";
+import { SiteLogo } from "@/components/SiteLogo";
 import { useCart } from "@/components/cart/CartContext";
 import { useWishlist } from "@/components/wishlist/WishlistContext";
 
@@ -30,18 +30,7 @@ export function SiteHeader({ logoUrl }: { logoUrl: string | null }) {
           center column off true center. */}
       <div className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
         <div aria-hidden />
-        <Link href="/" className="flex justify-center">
-          {logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- admin-uploaded logo URL
-            <img
-              src={logoUrl}
-              alt="Shokakko Australia"
-              className="h-14 w-auto max-w-[160px] object-contain sm:h-16 sm:max-w-[200px] lg:h-20 lg:max-w-[260px]"
-            />
-          ) : (
-            <Logo className="text-3xl sm:text-4xl" />
-          )}
-        </Link>
+        <SiteLogo logoUrl={logoUrl} size="homepage" linkClassName="flex justify-center" />
         <div className="flex items-center justify-end gap-1">
           <button
             type="button"

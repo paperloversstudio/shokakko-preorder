@@ -134,28 +134,53 @@ model OrderSequence {
 }
 
 model PreOrder {
-  id              String    @id @default(cuid())
+  id                String    @id @default(cuid())
   // Human-friendly reference shown to the customer, e.g. "SHK-000123".
-  orderNumber     String    @unique
-  customerName    String
-  customerEmail   String
-  shippingAddress String
-  // Null/empty means "same as shipping" — set only when the customer
-  // explicitly provides a different billing address.
-  billingAddress  String?
-  notes           String?
-  status          String    @default("new") // new | confirmed | fulfilled | cancelled
-  createdAt       DateTime  @default(now())
+  orderNumber       String    @unique
+  customerFirstName String
+  customerLastName  String
+  customerEmail     String
+
+  // Structured address (Address 1/2, Suburb, State/Territory, Postcode,
+  // Country) — replaces the old single free-text `shippingAddress` field so
+  // the admin preorder list/emails can render it consistently and the
+  // checkout form can validate each part. Address 1/Suburb/State/Postcode
+  // are always required; Address 2 is optional; Country defaults to
+  // "Australia" but is editable for international orders.
+  shippingAddress1 String
+  shippingAddress2 String?
+  shippingSuburb   String
+  shippingState    String
+  shippingPostcode String
+  shippingCountry  String @default("Australia")
+
+  // Same shape as shipping, but every field is nullable — null across the
+  // board means "same as shipping" (the checkout form's default), set only
+  // when the customer explicitly enters a different billing address.
+  billingAddress1 String?
+  billingAddress2 String?
+  billingSuburb   String?
+  billingState    String?
+  billingPostcode String?
+  billingCountry  String?
+
+  // "standard" | "express" — chosen at checkout, shown to the admin and on
+  // the order confirmation page.
+  shippingMethod String @default("standard")
+
+  notes          String?
+  status         String    @default("new") // new | confirmed | fulfilled | cancelled
+  createdAt      DateTime  @default(now())
   // Random, unguessable — the "possession = access" secret behind the
   // future /edit/[editToken] Pre-order Workspace page (not built yet, see
   // src/lib/edit-token.ts) and behind the shokakko_preorder_token cookie
   // that links a browser's ongoing wishlist to this order (§ WishlistItem).
   // Nullable because orders placed before this existed don't have one.
-  editToken       String?   @unique
+  editToken      String?   @unique
   // Set when this customer clicks the Unsubscribe link in an email
   // (Sprint 3) — excludes them from every future EmailDigest's recipient
   // list. Null = still subscribed.
-  unsubscribedAt  DateTime?
+  unsubscribedAt DateTime?
 
   items           OrderItem[]
   wishlistItems   WishlistItem[]

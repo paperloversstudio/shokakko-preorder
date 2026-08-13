@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { formatPrice } from "@/lib/validations/product";
+import { formatAddress, formatCustomerName, SHIPPING_METHOD_LABELS } from "@/lib/validations/order";
 import { StatusSelect } from "../StatusSelect";
 
 export default async function AdminPreOrderDetailPage({
@@ -82,17 +83,40 @@ export default async function AdminPreOrderDetailPage({
         <div className="flex flex-col gap-4">
           <div className="rounded-card bg-white p-5 shadow-sm shadow-ink/5">
             <h2 className="mb-2 font-display font-bold">Customer</h2>
-            <p className="font-semibold">{order.customerName}</p>
+            <p className="font-semibold">
+              {formatCustomerName(order.customerFirstName, order.customerLastName)}
+            </p>
             <p className="text-sm text-ink-soft">{order.customerEmail}</p>
           </div>
           <div className="rounded-card bg-white p-5 shadow-sm shadow-ink/5">
             <h2 className="mb-2 font-display font-bold">Shipping address</h2>
-            <p className="whitespace-pre-wrap text-sm">{order.shippingAddress}</p>
+            <p className="whitespace-pre-wrap text-sm">
+              {formatAddress({
+                address1: order.shippingAddress1,
+                address2: order.shippingAddress2,
+                suburb: order.shippingSuburb,
+                state: order.shippingState,
+                postcode: order.shippingPostcode,
+                country: order.shippingCountry,
+              })}
+            </p>
+            <p className="mt-3 text-sm font-semibold text-ink-soft">
+              {SHIPPING_METHOD_LABELS[order.shippingMethod as "standard" | "express"]}
+            </p>
           </div>
           <div className="rounded-card bg-white p-5 shadow-sm shadow-ink/5">
             <h2 className="mb-2 font-display font-bold">Billing address</h2>
             <p className="whitespace-pre-wrap text-sm">
-              {order.billingAddress ?? "Same as shipping"}
+              {order.billingAddress1
+                ? formatAddress({
+                    address1: order.billingAddress1,
+                    address2: order.billingAddress2,
+                    suburb: order.billingSuburb ?? "",
+                    state: order.billingState ?? "",
+                    postcode: order.billingPostcode ?? "",
+                    country: order.billingCountry ?? "",
+                  })
+                : "Same as shipping"}
             </p>
           </div>
         </div>

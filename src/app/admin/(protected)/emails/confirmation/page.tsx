@@ -2,6 +2,7 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { buildConfirmationEmailData } from "@/lib/email/data/confirmation";
 import { renderConfirmationEmail } from "@/lib/email/render";
+import { formatCustomerName } from "@/lib/validations/order";
 
 export default async function ConfirmationPreviewPage({
   searchParams,
@@ -11,7 +12,7 @@ export default async function ConfirmationPreviewPage({
 
   const orders = await db.preOrder.findMany({
     orderBy: { createdAt: "desc" },
-    select: { orderNumber: true, customerName: true },
+    select: { orderNumber: true, customerFirstName: true, customerLastName: true },
   });
   const selected = orderNumber ?? orders[0]?.orderNumber;
   const data = selected ? await buildConfirmationEmailData(selected) : null;
@@ -42,7 +43,7 @@ export default async function ConfirmationPreviewPage({
         >
           {orders.map((o) => (
             <option key={o.orderNumber} value={o.orderNumber}>
-              {o.orderNumber} — {o.customerName}
+              {o.orderNumber} — {formatCustomerName(o.customerFirstName, o.customerLastName)}
             </option>
           ))}
         </select>

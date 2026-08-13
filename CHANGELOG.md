@@ -2,6 +2,41 @@
 
 Notable changes to the Shokakko Australia pre-order site, newest first.
 
+## Checkout & Logo Polish (2026-08-14)
+
+Post-staging-review fixes: structured checkout fields, shipping method,
+logo sizing/placement, and clearer shipping copy.
+
+### Changed
+
+- **PreOrder schema restructured**: `customerName` split into
+  `customerFirstName`/`customerLastName`; the free-text `shippingAddress`/
+  `billingAddress` fields replaced with structured Address 1/2, Suburb,
+  State/Territory, Postcode, and Country (defaults to "Australia", still
+  editable) for both shipping and billing. Existing orders were backfilled
+  (old name → first name, old address → address line 1) rather than lost —
+  worth a quick tidy-up pass in the admin for any pre-existing orders.
+- **Shipping method** added to checkout: Standard Shipping or Express
+  Shipping, shown on the order confirmation page and in the admin
+  pre-order detail view.
+- **Checkout form fields**: "Full name" is now "First name"/"Last name";
+  the single shipping/billing address textarea is now six structured
+  fields each (`PreOrderFormFields.tsx`); a new note about free shipping
+  over AUD $100 and the Shipping Policy link sits under the shipping
+  method selector.
+- The existing "Tax included. Shipping fee may apply…" note above the
+  checkout form is now bold, for visibility.
+- **Site logo**: doubled in size on the homepage header; 4× on the
+  checkout page; now also shown (at homepage size) on My Pre-order and the
+  order confirmation ("Thank you") page, and at a compact size in the
+  admin header — previously those three pages only ever showed the
+  fallback text logo, never the uploaded image. New shared
+  `src/components/SiteLogo.tsx` component backs all five placements so
+  their sizing stays in sync.
+- `src/lib/email/first-name.ts` removed — `PreOrder.customerFirstName` now
+  exists directly, so the "split full name" helper it provided is no
+  longer needed.
+
 ## Milestone 1 — Staging Deployment Prep (2026-08-13)
 
 Prepares the project for a staging deployment on Vercel — **no

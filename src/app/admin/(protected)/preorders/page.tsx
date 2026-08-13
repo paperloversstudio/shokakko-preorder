@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { formatPrice } from "@/lib/validations/product";
+import { formatCustomerName } from "@/lib/validations/order";
 import { StatusSelect } from "./StatusSelect";
 
 export default async function AdminPreOrdersPage() {
@@ -46,7 +47,7 @@ export default async function AdminPreOrdersPage() {
                       {order.orderNumber}
                     </Link>
                     <span className="text-sm text-ink-soft">
-                      {order.customerName}
+                      {formatCustomerName(order.customerFirstName, order.customerLastName)}
                     </span>
                   </div>
                   <p className="truncate text-sm text-ink-soft">

@@ -67,11 +67,23 @@ export async function submitPreOrder(
     formData.get("billingSameAsShipping")?.toString() === "on";
 
   const parsed = orderFormSchema.safeParse({
-    customerName: formData.get("customerName")?.toString() ?? "",
+    customerFirstName: formData.get("customerFirstName")?.toString() ?? "",
+    customerLastName: formData.get("customerLastName")?.toString() ?? "",
     customerEmail: formData.get("customerEmail")?.toString() ?? "",
-    shippingAddress: formData.get("shippingAddress")?.toString() ?? "",
+    shippingAddress1: formData.get("shippingAddress1")?.toString() ?? "",
+    shippingAddress2: formData.get("shippingAddress2")?.toString() ?? "",
+    shippingSuburb: formData.get("shippingSuburb")?.toString() ?? "",
+    shippingState: formData.get("shippingState")?.toString() ?? "",
+    shippingPostcode: formData.get("shippingPostcode")?.toString() ?? "",
+    shippingCountry: formData.get("shippingCountry")?.toString() || "Australia",
+    shippingMethod: formData.get("shippingMethod")?.toString() ?? "standard",
     billingSameAsShipping: formData.get("billingSameAsShipping")?.toString(),
-    billingAddress: formData.get("billingAddress")?.toString() ?? "",
+    billingAddress1: formData.get("billingAddress1")?.toString() ?? "",
+    billingAddress2: formData.get("billingAddress2")?.toString() ?? "",
+    billingSuburb: formData.get("billingSuburb")?.toString() ?? "",
+    billingState: formData.get("billingState")?.toString() ?? "",
+    billingPostcode: formData.get("billingPostcode")?.toString() ?? "",
+    billingCountry: formData.get("billingCountry")?.toString() ?? "",
     notes: formData.get("notes")?.toString() ?? "",
   });
 
@@ -80,10 +92,17 @@ export async function submitPreOrder(
   }
   const values = parsed.data;
 
-  if (!billingSame && !values.billingAddress) {
+  if (
+    !billingSame &&
+    (!values.billingAddress1 ||
+      !values.billingSuburb ||
+      !values.billingState ||
+      !values.billingPostcode ||
+      !values.billingCountry)
+  ) {
     return {
       fieldErrors: {
-        billingAddress:
+        billingAddress1:
           "Enter a billing address, or tick “same as shipping”.",
       },
     };
@@ -142,10 +161,22 @@ export async function submitPreOrder(
     data: {
       orderNumber,
       editToken,
-      customerName: values.customerName,
+      customerFirstName: values.customerFirstName,
+      customerLastName: values.customerLastName,
       customerEmail: values.customerEmail,
-      shippingAddress: values.shippingAddress,
-      billingAddress: billingSame ? null : values.billingAddress || null,
+      shippingAddress1: values.shippingAddress1,
+      shippingAddress2: values.shippingAddress2 || null,
+      shippingSuburb: values.shippingSuburb,
+      shippingState: values.shippingState,
+      shippingPostcode: values.shippingPostcode,
+      shippingCountry: values.shippingCountry,
+      shippingMethod: values.shippingMethod,
+      billingAddress1: billingSame ? null : values.billingAddress1 || null,
+      billingAddress2: billingSame ? null : values.billingAddress2 || null,
+      billingSuburb: billingSame ? null : values.billingSuburb || null,
+      billingState: billingSame ? null : values.billingState || null,
+      billingPostcode: billingSame ? null : values.billingPostcode || null,
+      billingCountry: billingSame ? null : values.billingCountry || null,
       notes: values.notes || null,
       items: { create: lineItems },
       wishlistItems: { create: wishlistCreate },

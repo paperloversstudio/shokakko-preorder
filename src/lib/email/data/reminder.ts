@@ -1,6 +1,5 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { getFirstName } from "../first-name";
 import { buildEditUrl, buildFooterLinks } from "../site-url";
 import type { FooterLinks } from "../components/Footer";
 
@@ -33,7 +32,7 @@ export async function buildReminderEmailData(orderNumber: string): Promise<Remin
 
   return {
     subject: "Reminder: your Shokakko Australia pre-order closes soon",
-    firstName: getFirstName(order.customerName),
+    firstName: order.customerFirstName,
     countdownRemainingMs: settings?.countdownTargetAt
       ? settings.countdownTargetAt.getTime() - Date.now()
       : null,

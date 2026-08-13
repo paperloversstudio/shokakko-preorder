@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { toCatalogProduct } from "@/lib/catalog";
-import { Logo } from "@/components/Logo";
+import { SiteLogo } from "@/components/SiteLogo";
 import { Footer } from "@/components/layout/Footer";
 import { CheckoutForm } from "./CheckoutForm";
 
@@ -25,14 +25,7 @@ export default async function CheckoutPage() {
     <div className="flex min-h-screen flex-col">
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8">
         <div className="flex items-center justify-between">
-          <Link href="/" className="flex items-center">
-            {logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- admin-uploaded logo URL
-              <img src={logoUrl} alt="Shokakko Australia" className="h-9 w-auto" />
-            ) : (
-              <Logo className="text-lg" />
-            )}
-          </Link>
+          <SiteLogo logoUrl={logoUrl} size="checkout" linkClassName="flex items-center" />
           <Link
             href="/"
             className="text-sm font-semibold text-ink-soft hover:text-ink"

@@ -1,20 +1,20 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
-import { Logo } from "@/components/Logo";
+import { db } from "@/lib/db";
+import { SiteLogo } from "@/components/SiteLogo";
 import { logoutAction } from "./actions";
 
 export default async function AdminLayout({
   children,
 }: LayoutProps<"/admin">) {
   await requireAdmin();
+  const settings = await db.siteSettings.findUnique({ where: { id: "singleton" } });
 
   return (
     <div className="min-h-screen bg-cream">
       <header className="sticky top-0 z-10 border-b border-line bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <Link href="/admin">
-            <Logo className="text-lg" />
-          </Link>
+          <SiteLogo logoUrl={settings?.logoUrl ?? null} size="compact" href="/admin" />
           <nav className="flex flex-wrap items-center gap-1 text-sm font-semibold">
             <Link
               href="/admin/products"

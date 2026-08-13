@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Logo } from "@/components/Logo";
+import { db } from "@/lib/db";
+import { SiteLogo } from "@/components/SiteLogo";
 import { Footer } from "@/components/layout/Footer";
 
 export const metadata: Metadata = {
@@ -11,13 +12,13 @@ export const metadata: Metadata = {
 // lookup: customer enters their email, gets a secure "Edit My Pre-order"
 // link if one exists) is planned for a later sprint. Nothing behind this
 // page yet on purpose.
-export default function MyPreOrdersPage() {
+export default async function MyPreOrdersPage() {
+  const settings = await db.siteSettings.findUnique({ where: { id: "singleton" } });
+
   return (
     <div className="flex min-h-screen flex-col">
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center gap-6 px-4 py-10 text-center">
-        <Link href="/">
-          <Logo className="text-lg" />
-        </Link>
+        <SiteLogo logoUrl={settings?.logoUrl ?? null} size="homepage" />
         <div className="rounded-card bg-white p-8 shadow-sm shadow-ink/5">
           <p className="text-4xl">🧾</p>
           <h1 className="mt-2 font-display text-2xl font-bold">My Pre-order</h1>

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { buildReminderEmailData } from "@/lib/email/data/reminder";
 import { renderReminderEmail } from "@/lib/email/render";
+import { formatCustomerName } from "@/lib/validations/order";
 
 export default async function ReminderPreviewPage({
   searchParams,
@@ -11,7 +12,7 @@ export default async function ReminderPreviewPage({
 
   const orders = await db.preOrder.findMany({
     orderBy: { createdAt: "desc" },
-    select: { orderNumber: true, customerName: true },
+    select: { orderNumber: true, customerFirstName: true, customerLastName: true },
   });
   const selected = orderNumber ?? orders[0]?.orderNumber;
   const data = selected ? await buildReminderEmailData(selected) : null;
@@ -43,7 +44,7 @@ export default async function ReminderPreviewPage({
         >
           {orders.map((o) => (
             <option key={o.orderNumber} value={o.orderNumber}>
-              {o.orderNumber} — {o.customerName}
+              {o.orderNumber} — {formatCustomerName(o.customerFirstName, o.customerLastName)}
             </option>
           ))}
         </select>

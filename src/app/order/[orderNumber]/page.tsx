@@ -3,11 +3,12 @@ import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
-import { Logo } from "@/components/Logo";
+import { SiteLogo } from "@/components/SiteLogo";
 import { ClearCartOnMount } from "@/components/cart/ClearCartOnMount";
 import { Footer } from "@/components/layout/Footer";
 import { CopyLinkButton } from "@/components/shared/CopyLinkButton";
 import { formatPrice } from "@/lib/validations/product";
+import { formatAddress, SHIPPING_METHOD_LABELS } from "@/lib/validations/order";
 
 export const metadata: Metadata = {
   title: "Pre-order received — Shokakko Australia",
@@ -18,10 +19,10 @@ export default async function OrderConfirmationPage({
   params,
 }: PageProps<"/order/[orderNumber]">) {
   const { orderNumber } = await params;
-  const order = await db.preOrder.findUnique({
-    where: { orderNumber },
-    include: { items: true },
-  });
+  const [order, settings] = await Promise.all([
+    db.preOrder.findUnique({ where: { orderNumber }, include: { items: true } }),
+    db.siteSettings.findUnique({ where: { id: "singleton" } }),
+  ]);
 
   if (!order) notFound();
 
@@ -49,13 +50,13 @@ export default async function OrderConfirmationPage({
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-10">
         <ClearCartOnMount />
         <div className="text-center">
-          <Logo className="justify-center text-xl" />
+          <SiteLogo logoUrl={settings?.logoUrl ?? null} size="homepage" linkClassName="inline-flex" />
         </div>
 
         <div className="rounded-card bg-white p-6 text-center shadow-sm shadow-ink/5 sm:p-8">
           <p className="text-4xl">🌸</p>
           <h1 className="mt-2 font-display text-2xl font-bold">
-            Thank you, {order.customerName}!
+            Thank you, {order.customerFirstName}!
           </h1>
           <p className="mt-1 text-ink-soft">
             Your pre-order has been received — no payment was taken. We&apos;ll
@@ -113,12 +114,33 @@ export default async function OrderConfirmationPage({
         <div className="grid gap-6 sm:grid-cols-2">
           <div className="rounded-card bg-white p-6 shadow-sm shadow-ink/5">
             <h2 className="mb-2 font-display font-bold">Shipping to</h2>
-            <p className="whitespace-pre-wrap text-sm">{order.shippingAddress}</p>
+            <p className="whitespace-pre-wrap text-sm">
+              {formatAddress({
+                address1: order.shippingAddress1,
+                address2: order.shippingAddress2,
+                suburb: order.shippingSuburb,
+                state: order.shippingState,
+                postcode: order.shippingPostcode,
+                country: order.shippingCountry,
+              })}
+            </p>
+            <p className="mt-3 text-sm font-semibold text-ink-soft">
+              {SHIPPING_METHOD_LABELS[order.shippingMethod as "standard" | "express"]}
+            </p>
           </div>
           <div className="rounded-card bg-white p-6 shadow-sm shadow-ink/5">
             <h2 className="mb-2 font-display font-bold">Billing address</h2>
             <p className="whitespace-pre-wrap text-sm">
-              {order.billingAddress ?? "Same as shipping"}
+              {order.billingAddress1
+                ? formatAddress({
+                    address1: order.billingAddress1,
+                    address2: order.billingAddress2,
+                    suburb: order.billingSuburb ?? "",
+                    state: order.billingState ?? "",
+                    postcode: order.billingPostcode ?? "",
+                    country: order.billingCountry ?? "",
+                  })
+                : "Same as shipping"}
             </p>
           </div>
         </div>

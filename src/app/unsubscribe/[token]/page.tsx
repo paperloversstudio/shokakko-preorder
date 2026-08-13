@@ -41,7 +41,7 @@ export default async function UnsubscribePage({
             <p className="text-4xl">🌷</p>
             <h1 className="font-display text-xl font-bold">You&apos;re unsubscribed</h1>
             <p className="text-sm text-ink-soft">
-              {order.customerName}, you won&apos;t receive any more Update or
+              {order.customerFirstName}, you won&apos;t receive any more Update or
               Reminder emails from Shokakko Australia. Your pre-order itself
               is unaffected.
             </p>

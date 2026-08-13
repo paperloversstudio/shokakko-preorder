@@ -129,7 +129,7 @@ export function CheckoutForm({
         </div>
       )}
 
-      <p className="px-1 text-sm text-ink-soft">
+      <p className="px-1 text-sm font-bold text-ink">
         Tax included. Shipping fee may apply. For details, please refer to
         our{" "}
         <a

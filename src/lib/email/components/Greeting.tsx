@@ -2,7 +2,7 @@ import { emailBrand, emailFontFamily } from "./brand";
 
 /**
  * Email Design System — Greeting. "Hi {{first_name}}," — first name only
- * (see src/lib/email/first-name.ts), reused across all three templates.
+ * (PreOrder.customerFirstName), reused across all three templates.
  */
 export function Greeting({ firstName }: { firstName: string }) {
   return (
