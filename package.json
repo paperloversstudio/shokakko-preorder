@@ -9,6 +9,7 @@
     "lint": "eslint",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
+    "db:migrate:remote": "node scripts/apply-remote-migrations.mjs",
     "postinstall": "prisma generate"
   },
   "dependencies": {

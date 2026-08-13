@@ -110,16 +110,30 @@ committed by mistake.
    `main` branch specifically — see the note below).
 3. **Provision a hosted database** (required — SQLite's local file
    doesn't survive Vercel's read-only, ephemeral serverless filesystem):
-   - **Turso** (recommended — hosted libSQL, zero code change, same
-     `@prisma/adapter-libsql` this project already uses):
+   - **Turso** (recommended — hosted libSQL, zero *app* code change, same
+     `@prisma/adapter-libsql` this project already uses for its own
+     queries):
      ```bash
-     turso db create shokakko-staging
-     turso db show shokakko-staging --url          # → DATABASE_URL
-     turso db tokens create shokakko-staging        # → DATABASE_AUTH_TOKEN
+     turso db create shokakko-preorder-staging
+     turso db show shokakko-preorder-staging --url          # → DATABASE_URL
+     turso db tokens create shokakko-preorder-staging        # → DATABASE_AUTH_TOKEN
      ```
-     Set both as Vercel env vars, then run the migrations against it once
-     from your machine: `DATABASE_URL=<turso-url> DATABASE_AUTH_TOKEN=<token>
-     pnpm exec prisma migrate deploy`.
+     Set both as Vercel env vars, then apply the schema to it once from
+     your machine:
+     ```bash
+     DATABASE_URL="<turso-url>" DATABASE_AUTH_TOKEN="<token>" \
+       pnpm run db:migrate:remote
+     ```
+     **Not** `prisma migrate deploy` — confirmed while setting up staging
+     that Prisma's migrate engine rejects `libsql://` URLs outright
+     (`P1013: the scheme is not recognized`) for a `provider = "sqlite"`
+     datasource, even though the app's own runtime queries go through
+     `libsql://` just fine via the driver adapter. This only affects
+     *applying* migrations, not normal queries. `db:migrate:remote`
+     (`scripts/apply-remote-migrations.mjs`) applies `prisma/migrations/*/migration.sql`
+     directly via `@libsql/client`, tracking what's been applied in a
+     small `_manual_migrations` table so it's safe to re-run after adding
+     future migrations — only the new ones get applied.
    - Postgres (Neon, etc.) is the other supported option but needs a code
      change first — swap the adapter in `src/lib/db.ts` to
      `@prisma/adapter-pg` and `prisma/schema.prisma`'s `provider` to
@@ -325,6 +339,14 @@ to commit SHAs) still reference.
 
 ## Common Deployment Issues
 
+- **`prisma migrate deploy`/`migrate dev` fails with `P1013: The provided
+  database string is invalid. The scheme is not recognized`** against a
+  Turso/libSQL `DATABASE_URL`: expected, not a misconfiguration. Prisma's
+  migrate engine doesn't accept `libsql://` for a `provider = "sqlite"`
+  datasource — use `pnpm run db:migrate:remote` instead (see
+  [Vercel Deployment](#vercel-deployment) step 3). Local SQLite
+  (`file:./dev.db`) is unaffected; this only comes up against a hosted
+  libSQL database.
 - **Build fails with "Prisma Client not generated" / `@prisma/client did
   not initialize yet`**: Vercel's build runs `pnpm install` then
   `pnpm run build` — Prisma Client needs an explicit `prisma generate`
