@@ -1,0 +1,257 @@
+// Shokakko Australia — Pre-order management system
+// Schema starts on SQLite for zero-setup local development.
+// Before deploying for a live exhibition, switch `provider` to "postgresql"
+// and point DATABASE_URL at a hosted Postgres instance (e.g. Neon) —
+// see PROJECT_NOTES.md "Going live" section.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Product {
+  id                     String   @id @default(cuid())
+  brand                  String
+  name                   String
+  sku                    String   @unique
+  description            String?
+  estimatedArrival       String?
+  // Price stored in cents to avoid float rounding issues. Null = "Coming Soon".
+  priceCents             Int?
+  currency               String   @default("AUD")
+  // Free-text taxonomy, same pattern as `brand` — no fixed list.
+  type                   String?
+  // "active" | "draft" | "sold_out" — plain String (not a Prisma enum) to
+  // match PreOrder.status's existing pattern and because Prisma enums
+  // aren't supported on this project's SQLite datasource. "active" =
+  // visible + orderable, "sold_out" = visible but not orderable, "draft" =
+  // hidden from the customer site entirely (replaces the old isActive flag).
+  status                 String   @default("active")
+  // Lower sortOrder shows first; new products default to the end of the list.
+  sortOrder              Int      @default(0)
+  // Manual admin toggle driving the Update Email's "New Products" section
+  // (Sprint 3) — deliberately not automatic/date-based, so Karen controls
+  // exactly which products count as new and for how long.
+  isNew                  Boolean  @default(false)
+  // Baseline for the Update Email's "Price Updates" section (Sprint 3) —
+  // seeded to priceCents on create, and only advanced again when a price
+  // change is captured in a generated EmailDigest (see EmailDigestItem).
+  // Null = no baseline yet (pre-Sprint-3 products), so nothing is ever
+  // flagged as "changed" until a first baseline exists.
+  lastNotifiedPriceCents Int?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  images               ProductImage[]
+  tags                 Tag[]
+  orderItems           OrderItem[]
+  wishlistItems        WishlistItem[]
+  digestItems          EmailDigestItem[]
+  recommendedInDigests EmailDigest[]     @relation("DigestRecommended")
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  // Drag-and-drop sort order in the admin; the lowest is the product's
+  // primary/thumbnail image everywhere on the customer site.
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model Tag {
+  id                String        @id @default(cuid())
+  name              String        @unique
+  // Square collection image for the Update Email's Collection Card
+  // component (Sprint 3) — collections had no image at all before this;
+  // managed from the new /admin/collections page.
+  imageUrl          String?
+  products          Product[]
+  featuredInDigests EmailDigest[] @relation("DigestCollections")
+}
+
+model HeroBanner {
+  id              String   @id @default(cuid())
+  headline        String
+  description     String?
+  buttonText      String?
+  buttonUrl       String?
+  // Three separate uploads for true responsive crops, not one CSS-scaled
+  // image: 1920x600 desktop, 1600x500 tablet, 1080x1350 mobile.
+  desktopImageUrl String
+  tabletImageUrl  String
+  mobileImageUrl  String
+  // Only active banners rotate on the homepage hero.
+  isActive        Boolean  @default(true)
+  // Drag-and-drop order in the admin list; also the rotation order.
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Single-row settings table (id is always "singleton"). Drives the
+// homepage header logo, the hero's event-info/countdown strip, and the
+// checkout page's admin-editable pre-order instructions.
+model SiteSettings {
+  id                     String    @id @default("singleton")
+  logoUrl                String?
+  eventName              String?
+  eventLocation          String?
+  eventInfo              String?
+  countdownTargetAt      DateTime?
+  // Rich text (HTML) written via the admin's WYSIWYG editor, rendered above
+  // the checkout form. The editor (Tiptap) constrains its own output to a
+  // small node/mark allow-list (paragraphs, bold/italic, lists, links), so
+  // there's no path to an injected <script> tag without a separate
+  // sanitizer — see src/app/admin/(protected)/settings/PreorderInfoEditor.tsx.
+  preorderInfoHtml       String?
+  // --- Email settings (Sprint 3) --- one static hero image for the Update
+  // Email (distinct from the homepage's rotating multi-banner HeroBanner —
+  // the email only ever shows one), plus footer links for every email
+  // template. All optional; pre-filled with the real site URLs by the
+  // admin the first time these are saved, but editable independently of
+  // the site-wide Footer.tsx component (which stays hardcoded/unchanged).
+  emailHeroImageUrl      String?
+  emailHeroLinkUrl       String?
+  emailContactUrl        String?
+  emailShippingPolicyUrl String?
+  emailWebsiteUrl        String?
+  emailInstagramUrl      String?
+  updatedAt              DateTime  @updatedAt
+}
+
+// Single-row counter (id is always "singleton") backing sequential
+// PO#### order numbers. Only ever increments, so a deleted PreOrder's
+// number is never reused — see src/lib/order-number.ts.
+model OrderSequence {
+  id         String @id @default("singleton")
+  lastNumber Int    @default(1000)
+}
+
+model PreOrder {
+  id              String    @id @default(cuid())
+  // Human-friendly reference shown to the customer, e.g. "SHK-000123".
+  orderNumber     String    @unique
+  customerName    String
+  customerEmail   String
+  shippingAddress String
+  // Null/empty means "same as shipping" — set only when the customer
+  // explicitly provides a different billing address.
+  billingAddress  String?
+  notes           String?
+  status          String    @default("new") // new | confirmed | fulfilled | cancelled
+  createdAt       DateTime  @default(now())
+  // Random, unguessable — the "possession = access" secret behind the
+  // future /edit/[editToken] Pre-order Workspace page (not built yet, see
+  // src/lib/edit-token.ts) and behind the shokakko_preorder_token cookie
+  // that links a browser's ongoing wishlist to this order (§ WishlistItem).
+  // Nullable because orders placed before this existed don't have one.
+  editToken       String?   @unique
+  // Set when this customer clicks the Unsubscribe link in an email
+  // (Sprint 3) — excludes them from every future EmailDigest's recipient
+  // list. Null = still subscribed.
+  unsubscribedAt  DateTime?
+
+  items           OrderItem[]
+  wishlistItems   WishlistItem[]
+  receivedDigests EmailDigest[]  @relation("DigestRecipients")
+}
+
+// A customer's wishlist, once it's durable (see WishlistContext.tsx's
+// local/linked modes) — created by migrating their localStorage wishlist
+// into the database the moment they submit their first pre-order. Deliberately
+// NOT a snapshot like OrderItem: the whole point of the wishlist is live
+// price/status, so it's a plain reference to the current Product row, and
+// disappears (cascades) if that product is ever deleted.
+model WishlistItem {
+  id         String   @id @default(cuid())
+  preOrderId String
+  preOrder   PreOrder @relation(fields: [preOrderId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  addedAt    DateTime @default(now())
+
+  @@unique([preOrderId, productId])
+}
+
+model OrderItem {
+  id         String   @id @default(cuid())
+  preOrderId String
+  preOrder   PreOrder @relation(fields: [preOrderId], references: [id], onDelete: Cascade)
+  // Nullable + SetNull: the product can be edited or deleted later without
+  // touching past orders — productName/productBrand/productSku/unitPriceCents
+  // below are the permanent record of what was actually ordered.
+  productId  String?
+  product    Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  quantity   Int
+
+  // Snapshot of product details at order time, so the order stays accurate
+  // even if the product is later edited or removed.
+  productName    String
+  productBrand   String
+  productSku     String
+  unitPriceCents Int?
+}
+
+// --- Email Communication System (Sprint 3) ---
+//
+// One prepared Update Email — "collect changes throughout the day, then
+// generate" (see docs/PRD.md for the full Notification Centre write-up).
+// There's at most one draft/generated digest at a time; once a digest
+// reaches "sent" it becomes immutable history and the next Generate Email
+// starts a fresh row. `status` already includes "sent" so Sprint 4 (real
+// email delivery) only has to add the send action, not reshape this model.
+// No email is actually sent this sprint — see src/lib/email/types.ts's
+// EmailService interface, which exists for Sprint 4 to implement against.
+model EmailDigest {
+  id               String    @id @default(cuid())
+  status           String    @default("draft") // draft | generated | sent (sent unused until Sprint 4)
+  subject          String    @default("Shokakko Australia — Latest Updates")
+  karenNotesHtml   String?
+  showKarenNotes   Boolean   @default(false)
+  showCollections  Boolean   @default(false)
+  showRecommended  Boolean   @default(false)
+  showNewProducts  Boolean   @default(false)
+  showPriceUpdates Boolean   @default(false)
+  ctaText          String    @default("View New Products")
+  ctaUrl           String    @default("/")
+  // Saved by "Generate Email" — one representative preview render (a
+  // placeholder greeting name), NOT what every recipient would actually
+  // receive. Real per-recipient rendering happens at send time (Sprint 4);
+  // renderUpdateEmail() is already fully parameterized per-recipient.
+  renderedHtml     String?
+  recipientCount   Int?
+  generatedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Admin-picked: which collections/products to feature this time.
+  collections         Tag[]             @relation("DigestCollections")
+  recommendedProducts Product[]         @relation("DigestRecommended")
+  // Computed at generate time — "prepare all required recipient data":
+  // every PreOrder with unsubscribedAt: null as of that moment.
+  recipients          PreOrder[]        @relation("DigestRecipients")
+  items               EmailDigestItem[]
+}
+
+// New Products / Price Updates are computed automatically (not
+// admin-picked) and snapshotted at generate time — same "snapshot vs.
+// live-reference" reasoning as OrderItem vs. WishlistItem elsewhere in
+// this schema — so a digest's history stays accurate even if the
+// product's price changes again afterward, or the product is deleted.
+model EmailDigestItem {
+  id                 String      @id @default(cuid())
+  digestId           String
+  digest             EmailDigest @relation(fields: [digestId], references: [id], onDelete: Cascade)
+  productId          String?
+  product            Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  kind               String // "new" | "price_update"
+  productName        String
+  priceCents         Int?
+  previousPriceCents Int? // only set for kind = "price_update"
+}

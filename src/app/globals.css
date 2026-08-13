@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+:root {
+  /* Shokakko brand palette */
+  --color-blue: #97b4d6;
+  --color-lavender: #e0c9e8;
+  --color-coral: #e89898;
+  --color-mint: #ddefe6;
+
+  /* Neutrals tuned to sit warmly against the pastels above */
+  --color-cream: #fdfbf8;
+  --color-ink: #4a3f42;
+  --color-ink-soft: #8a7b7e;
+  --color-line: #ecdfe6;
+}
+
+@theme inline {
+  --color-blue: var(--color-blue);
+  --color-lavender: var(--color-lavender);
+  --color-coral: var(--color-coral);
+  --color-mint: var(--color-mint);
+  --color-cream: var(--color-cream);
+  --color-ink: var(--color-ink);
+  --color-ink-soft: var(--color-ink-soft);
+  --color-line: var(--color-line);
+
+  /* Single site-wide font (Poppins, loaded in layout.tsx) — both display
+     and body tokens resolve to it, so every existing font-display/font-body
+     class keeps working unchanged. */
+  --font-display: var(--font-poppins);
+  --font-body: var(--font-poppins);
+
+  --radius-card: 1.5rem;
+  --radius-pill: 999px;
+}
+
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+}
+
+/* Soft, rounded, hand-drawn-ish default look across the site */
+* {
+  border-color: var(--color-line);
+}
+
+::selection {
+  background: var(--color-lavender);
+  color: var(--color-ink);
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+/* Shared by the admin's Tiptap editor (live view) and the checkout page's
+   rendered pre-order info — the editor's schema is deliberately limited to
+   exactly these elements, see PreorderInfoEditor.tsx. */
+.rich-text p {
+  margin-bottom: 0.75em;
+}
+.rich-text p:last-child {
+  margin-bottom: 0;
+}
+.rich-text ul,
+.rich-text ol {
+  margin: 0.25em 0 0.75em 1.25em;
+}
+.rich-text ul {
+  list-style: disc;
+}
+.rich-text ol {
+  list-style: decimal;
+}
+.rich-text a {
+  color: var(--color-blue);
+  text-decoration: underline;
+}
+.rich-text strong {
+  font-weight: 700;
+}
+
+/* Custom number-less spinner-free quantity input */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
