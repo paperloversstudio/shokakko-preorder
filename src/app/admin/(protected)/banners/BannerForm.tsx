@@ -1,8 +1,9 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Field, inputClass } from "@/components/ui/Field";
+import { compressImageFile } from "@/lib/image-compress";
 import type { BannerFormState } from "./actions";
 
 type BannerDefaults = {
@@ -43,6 +44,7 @@ function ImageSlot({
   required: boolean;
 }) {
   const [preview, setPreview] = useState<string | null>(currentUrl);
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={name} className="text-sm font-semibold text-ink-soft">
@@ -57,14 +59,24 @@ function ImageSlot({
         )}
       </div>
       <input
+        ref={inputRef}
         id={name}
         name={name}
         type="file"
         accept="image/jpeg,image/png,image/webp,image/gif"
         required={required && !currentUrl}
-        onChange={(e) => {
+        onChange={async (e) => {
           const file = e.target.files?.[0];
-          if (file) setPreview(URL.createObjectURL(file));
+          if (!file) return;
+          setPreview(URL.createObjectURL(file));
+          // Recompress before it ever sits in the form — three full hero
+          // images submitted together can otherwise exceed Vercel's
+          // platform-level request-body limit even though each one passes
+          // this app's own 8MB/file check (see src/lib/image-compress.ts).
+          const compressed = await compressImageFile(file);
+          const dt = new DataTransfer();
+          dt.items.add(compressed);
+          if (inputRef.current) inputRef.current.files = dt.files;
         }}
         className="text-xs"
       />

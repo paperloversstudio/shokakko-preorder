@@ -2,6 +2,34 @@
 
 Notable changes to the Shokakko Australia pre-order site, newest first.
 
+## Hero banner upload fix (2026-08-14)
+
+### Fixed
+
+- **Hero banner uploads failed on staging** with a raw browser network
+  error ("This page couldn't load") — reported after the Sprint 3.5
+  deploy. Root cause: Vercel's serverless functions cap a request body at
+  ~4.5MB, a hard platform limit that can't be raised from application code
+  (this app's own `next.config.ts` body-size setting only governs what
+  Next.js accepts *below* that ceiling). A hero banner submits three
+  full-size images (up to 8MB each, per this app's own per-file check) in
+  one request — easily exceeding Vercel's limit even though every
+  individual file passed validation. Vercel rejects the oversized request
+  before Next.js ever runs, so the failure showed as a generic browser
+  error instead of anything in-app.
+- **Fix**: new `src/lib/image-compress.ts` re-encodes every uploaded photo
+  through a canvas the moment it's selected, before it's ever added to a
+  form — same visual quality, dramatically smaller file size (a real
+  7.7MB product photo already in this app's uploads compressed to
+  0.34MB in testing). Wired into the three places that can bundle
+  multiple photos into one submission: `BannerForm.tsx` (the reported
+  bug — three required hero images), `ProductImageManager.tsx` (multiple
+  product photos), and `ProductVariantManager.tsx` (variant images).
+  Deliberately **not** applied to the site logo or collection image
+  uploads (single files, well under the limit on their own, more likely
+  to need PNG transparency preserved — this fix re-encodes everything as
+  JPEG).
+
 ## Post-Sprint-3.5 fix (2026-08-14)
 
 ### Fixed

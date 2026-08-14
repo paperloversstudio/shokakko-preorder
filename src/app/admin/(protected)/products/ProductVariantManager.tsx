@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { inputClass } from "@/components/ui/Field";
+import { compressImageFile } from "@/lib/image-compress";
 
 type VariantRow = {
   key: string; // stable React key — existing variant id, or a generated temp id
@@ -163,15 +164,22 @@ export function ProductVariantManager({
                     type="file"
                     accept="image/jpeg,image/png,image/webp,image/gif"
                     className="hidden"
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const file = e.target.files?.[0] ?? null;
+                      e.target.value = "";
                       if (!file) return;
+                      // Recompress before it ever sits in the form —
+                      // several variant images submitted together can
+                      // otherwise exceed Vercel's platform-level
+                      // request-body limit even though each one passes
+                      // this app's own 8MB/file check (see
+                      // src/lib/image-compress.ts).
+                      const compressed = await compressImageFile(file);
                       updateRow(index, {
-                        newImageFile: file,
-                        newImagePreviewUrl: URL.createObjectURL(file),
+                        newImageFile: compressed,
+                        newImagePreviewUrl: URL.createObjectURL(compressed),
                         removeImage: false,
                       });
-                      e.target.value = "";
                     }}
                   />
                 </label>

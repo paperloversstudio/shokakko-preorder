@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { compressImageFile } from "@/lib/image-compress";
 
 type Slot =
   | { kind: "existing"; id: string; url: string }
@@ -40,9 +41,16 @@ export function ProductImageManager({
     if (fileInputRef.current) fileInputRef.current.files = dt.files;
   }, [slots]);
 
-  function addFiles(fileList: FileList | null) {
+  async function addFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
-    const newSlots: Slot[] = Array.from(fileList).map((file) => ({
+    // Recompress before it ever sits in the form — several full-size photos
+    // submitted together can otherwise exceed Vercel's platform-level
+    // request-body limit even though each one passes this app's own
+    // 8MB/file check (see src/lib/image-compress.ts).
+    const compressed = await Promise.all(
+      Array.from(fileList).map((file) => compressImageFile(file)),
+    );
+    const newSlots: Slot[] = compressed.map((file) => ({
       kind: "new",
       file,
       previewUrl: URL.createObjectURL(file),
@@ -113,7 +121,7 @@ export function ProductImageManager({
             multiple
             className="hidden"
             onChange={(e) => {
-              addFiles(e.target.files);
+              void addFiles(e.target.files);
               e.target.value = "";
             }}
           />
