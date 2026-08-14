@@ -34,6 +34,11 @@ export const productFormSchema = z.object({
   // section (Sprint 3) — a plain checkbox, so its form value is the
   // presence of "on", same pattern as ProductForm's other checkboxes.
   isNew: z.boolean().default(false),
+  // Sprint 3.5 — one optional variant group (e.g. "Design"). Free text,
+  // same pattern as `type`/`brand`. Empty/blank means "no variants" —
+  // see ProductVariantManager.tsx, which only shows the variant rows
+  // editor once this has a value.
+  variantGroupName: z.string().trim().max(120).optional(),
 });
 
 export type ProductFormValues = z.infer<typeof productFormSchema>;

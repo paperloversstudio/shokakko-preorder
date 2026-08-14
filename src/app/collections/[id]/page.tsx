@@ -36,7 +36,11 @@ export default async function CollectionPage({ params }: PageProps<"/collections
         products: {
           where: { status: { in: ["active", "sold_out"] } },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
-          include: { tags: true, images: { orderBy: { sortOrder: "asc" } } },
+          include: {
+            tags: true,
+            images: { orderBy: { sortOrder: "asc" } },
+            variants: { orderBy: { sortOrder: "asc" } },
+          },
         },
       },
     }),

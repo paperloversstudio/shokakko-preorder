@@ -21,7 +21,11 @@ export default async function HomePage() {
       // orderable (see ProductCard).
       where: { status: { in: ["active", "sold_out"] } },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
-      include: { tags: true, images: { orderBy: { sortOrder: "asc" } } },
+      include: {
+        tags: true,
+        images: { orderBy: { sortOrder: "asc" } },
+        variants: { orderBy: { sortOrder: "asc" } },
+      },
     }),
     db.heroBanner.findMany({
       where: { isActive: true },

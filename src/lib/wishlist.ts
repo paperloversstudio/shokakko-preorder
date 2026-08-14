@@ -19,12 +19,18 @@ export const PREORDER_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 365;
  * which would quietly stop persisting anything.
  *
  * Returns `[]` for a validly-linked order that just has nothing saved yet.
+ *
+ * Sprint 3.5: each id is the bare `productId`, or `${productId}::${variantId}`
+ * for a wishlisted variant — same composite-key convention
+ * `WishlistContext`/`CartContext` use everywhere else.
  */
 export async function getLinkedWishlist(token: string): Promise<string[] | null> {
   const preOrder = await db.preOrder.findUnique({
     where: { editToken: token },
-    select: { wishlistItems: { select: { productId: true } } },
+    select: { wishlistItems: { select: { productId: true, variantId: true } } },
   });
   if (!preOrder) return null;
-  return preOrder.wishlistItems.map((item) => item.productId);
+  return preOrder.wishlistItems.map((item) =>
+    item.variantId ? `${item.productId}::${item.variantId}` : item.productId,
+  );
 }

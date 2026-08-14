@@ -2,16 +2,16 @@
 
 import { Drawer } from "@/components/ui/Drawer";
 import { formatPrice } from "@/lib/validations/product";
-import { useCart } from "@/components/cart/CartContext";
+import { useCart, parseCartKey } from "@/components/cart/CartContext";
 import type { CatalogProduct } from "@/components/catalog/types";
 import { useWishlist } from "./WishlistContext";
 
 /** Scoped to this drawer only — the rest of the app already has its own
  * Sold Out badge / "Price Coming Soon" text treatments (ProductCard,
  * Product Details, checkout) that this doesn't touch. */
-function getStatusDisplay(product: CatalogProduct): { emoji: string; label: string } {
+function getStatusDisplay(product: CatalogProduct, priceCents: number | null): { emoji: string; label: string } {
   if (product.status === "sold_out") return { emoji: "🔴", label: "Sold Out" };
-  if (product.priceCents === null) return { emoji: "🟡", label: "Price Coming Soon" };
+  if (priceCents === null) return { emoji: "🟡", label: "Price Coming Soon" };
   return { emoji: "🟢", label: "Available" };
 }
 
@@ -20,8 +20,26 @@ export function WishlistDrawer({ products }: { products: CatalogProduct[] }) {
   const cart = useCart();
 
   const items = wishlist.ids
-    .map((id) => products.find((p) => p.id === id))
-    .filter((p): p is CatalogProduct => p !== undefined);
+    .map((wishlistKey) => {
+      const { productId, variantId } = parseCartKey(wishlistKey);
+      const product = products.find((p) => p.id === productId);
+      if (!product) return null;
+      const variant = variantId
+        ? (product.variants.find((v) => v.id === variantId) ?? null)
+        : null;
+      return { wishlistKey, productId, variantId, product, variant };
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        wishlistKey: string;
+        productId: string;
+        variantId: string | null;
+        product: CatalogProduct;
+        variant: CatalogProduct["variants"][number] | null;
+      } => item !== null,
+    );
 
   return (
     <Drawer
@@ -36,18 +54,16 @@ export function WishlistDrawer({ products }: { products: CatalogProduct[] }) {
         </p>
       ) : (
         <ul className="flex flex-col divide-y divide-line">
-          {items.map((product) => {
-            const statusDisplay = getStatusDisplay(product);
+          {items.map(({ wishlistKey, productId, variantId, product, variant }) => {
+            const imageUrl = variant?.imageUrl ?? product.images[0]?.url;
+            const priceCents = variant?.priceCents ?? product.priceCents;
+            const statusDisplay = getStatusDisplay(product, priceCents);
             return (
-              <li key={product.id} className="flex items-center gap-3 py-3">
+              <li key={wishlistKey} className="flex items-center gap-3 py-3">
                 <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-mint/30">
-                  {product.images[0]?.url ? (
+                  {imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={product.images[0].url}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
+                    <img src={imageUrl} alt="" className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-lg">
                       🎀
@@ -56,10 +72,10 @@ export function WishlistDrawer({ products }: { products: CatalogProduct[] }) {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">{product.name}</p>
-                  <p className="truncate text-xs text-ink-soft">{product.brand}</p>
-                  <p className="text-xs text-ink-soft">
-                    {formatPrice(product.priceCents, product.currency)}
+                  <p className="truncate text-xs text-ink-soft">
+                    {variant ? `${product.variantGroupName}: ${variant.name}` : product.brand}
                   </p>
+                  <p className="text-xs text-ink-soft">{formatPrice(priceCents, product.currency)}</p>
                   <p className="text-xs text-ink-soft">
                     <span aria-hidden>{statusDisplay.emoji}</span> {statusDisplay.label}
                   </p>
@@ -69,8 +85,8 @@ export function WishlistDrawer({ products }: { products: CatalogProduct[] }) {
                     <button
                       type="button"
                       onClick={() => {
-                        cart.addItem(product.id);
-                        wishlist.toggle(product.id);
+                        cart.addItem(productId, variantId);
+                        wishlist.toggle(productId, variantId);
                       }}
                       aria-label={`Move ${product.name} to pre-order`}
                       className="rounded-pill bg-blue px-3 py-1 text-xs font-bold text-white transition hover:brightness-105"
@@ -80,7 +96,7 @@ export function WishlistDrawer({ products }: { products: CatalogProduct[] }) {
                   )}
                   <button
                     type="button"
-                    onClick={() => wishlist.toggle(product.id)}
+                    onClick={() => wishlist.toggle(productId, variantId)}
                     aria-label={`Remove ${product.name} from wishlist`}
                     className="text-xs font-semibold text-coral hover:underline"
                   >

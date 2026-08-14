@@ -82,6 +82,21 @@ select {
   font-weight: 700;
 }
 
+/* Purchase Dashboard's print-friendly view (Sprint 3.5) — the admin
+   header/nav and the dashboard's own summary tiles/filters/buttons all
+   carry `print:hidden` in their components; this just resets page
+   chrome (background tint, shadows, rounded cards read oddly on paper)
+   so what's left prints as a clean table. First @media print rule in
+   the project. */
+@media print {
+  body {
+    background: #fff;
+  }
+  .shadow-sm {
+    box-shadow: none !important;
+  }
+}
+
 /* Custom number-less spinner-free quantity input */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {

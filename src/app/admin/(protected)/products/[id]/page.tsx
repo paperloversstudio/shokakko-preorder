@@ -14,6 +14,7 @@ export default async function EditProductPage({
     include: {
       tags: true,
       images: { orderBy: { sortOrder: "asc" } },
+      variants: { orderBy: { sortOrder: "asc" } },
     },
   });
 
@@ -61,6 +62,14 @@ export default async function EditProductPage({
             tags: product.tags.map((t) => t.name),
             images: product.images.map((img) => ({ id: img.id, url: img.url })),
             isNew: product.isNew,
+            variantGroupName: product.variantGroupName ?? "",
+            variants: product.variants.map((v) => ({
+              id: v.id,
+              name: v.name,
+              sku: v.sku,
+              priceCents: v.priceCentsOverride,
+              imageUrl: v.imageUrl,
+            })),
           }}
         />
       </div>

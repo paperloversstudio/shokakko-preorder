@@ -16,6 +16,11 @@ export function ProductCard({ product }: { product: CatalogProduct }) {
   const image = product.images[0]?.url;
   const isWishlisted = wishlist.has(product.id);
   const detailsHref = `/product/${product.id}`;
+  // Sprint 3.5 — a product with variants can't be wishlisted/added to
+  // cart with one click from the grid (which variant is wanted has to be
+  // chosen first) — "View Options" sends them to the Details page, where
+  // the pills live, instead of guessing.
+  const hasVariants = Boolean(product.variantGroupName) && product.variants.length > 0;
 
   return (
     <li
@@ -41,15 +46,17 @@ export function ProductCard({ product }: { product: CatalogProduct }) {
             </div>
           )}
         </Link>
-        <button
-          type="button"
-          onClick={() => wishlist.toggle(product.id)}
-          aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
-          aria-pressed={isWishlisted}
-          className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-pill bg-white/90 text-base shadow-sm transition active:scale-95"
-        >
-          {isWishlisted ? "❤️" : "♡"}
-        </button>
+        {!hasVariants && (
+          <button
+            type="button"
+            onClick={() => wishlist.toggle(product.id)}
+            aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+            aria-pressed={isWishlisted}
+            className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-pill bg-white/90 text-base shadow-sm transition active:scale-95"
+          >
+            {isWishlisted ? "❤️" : "♡"}
+          </button>
+        )}
         {isSoldOut && (
           <span className="absolute left-1.5 top-1.5 rounded-pill bg-ink/80 px-2 py-0.5 text-[10px] font-bold text-white">
             Sold Out
@@ -65,15 +72,6 @@ export function ProductCard({ product }: { product: CatalogProduct }) {
           <h3 className="line-clamp-2 font-display text-sm font-bold leading-snug">
             {product.name}
           </h3>
-          <p className="text-[10px] text-ink-soft">SKU {product.sku}</p>
-          {product.description && (
-            <p className="line-clamp-2 text-xs text-ink-soft">{product.description}</p>
-          )}
-          {product.estimatedArrival && (
-            <p className="text-[10px] font-semibold text-ink-soft">
-              📦 {product.estimatedArrival}
-            </p>
-          )}
         </Link>
 
         {/* Collection tags are intentionally not shown to customers here —
@@ -87,7 +85,14 @@ export function ProductCard({ product }: { product: CatalogProduct }) {
               formatPrice(product.priceCents, product.currency)
             )}
           </span>
-          {isSoldOut ? (
+          {hasVariants ? (
+            <Link
+              href={detailsHref}
+              className="rounded-pill bg-blue px-3 py-1.5 text-xs font-display font-bold text-white shadow-sm shadow-blue/30 transition hover:brightness-105"
+            >
+              View Options
+            </Link>
+          ) : isSoldOut ? (
             <Badge tone="coral">Sold Out</Badge>
           ) : (
             <QuantitySelector

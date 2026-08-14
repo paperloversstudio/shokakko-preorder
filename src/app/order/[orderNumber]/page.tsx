@@ -91,6 +91,11 @@ export default async function OrderConfirmationPage({
               <li key={item.id} className="flex items-center justify-between gap-3 py-3">
                 <div>
                   <p className="font-semibold">{item.productName}</p>
+                  {item.variantName && (
+                    <p className="text-sm font-semibold text-ink-soft">
+                      Variant: {item.variantName}
+                    </p>
+                  )}
                   <p className="text-sm text-ink-soft">{item.productBrand}</p>
                 </div>
                 <div className="text-right">

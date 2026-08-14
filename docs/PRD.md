@@ -13,6 +13,20 @@ a future sprint. Carries forward Sprint 2's durable wishlist/Pre-order
 Workspace architecture and the UI Refinement Pass that preceded it.
 **5.1** (Milestone 1, Staging Deployment Prep): §9 now points to the new
 `docs/DEPLOYMENT.md`; "no git repository" resolved — see §14).
+**6.0** (Sprint 3.5 — Product Variants, Purchase Dashboard & Analytics
+Dashboard): one optional variant group per product, shown to customers as
+selectable pills (§2.17); a simplified homepage card (§2.1); a mobile-first
+admin Purchase Dashboard for buying efficiently during an exhibition
+(§2.18); an Analytics Dashboard surfacing wishlist/order interest signals
+(§2.19); a small `ActivityLog` table feeding both dashboards' "Recent
+Activity." This sprint deliberately did not touch the checkout flow's
+steps, fields, or UX. Also folds in the still-undocumented **Checkout &
+Logo Polish** pass from the previous session: `PreOrder.customerName` split
+into `customerFirstName`/`customerLastName`, the shipping/billing address
+fields restructured from one free-text field into Address 1/2, Suburb,
+State, Postcode, Country, a Standard/Express `shippingMethod` selector, a
+bolded shipping notice, and the shared `SiteLogo` component (2x size on the
+homepage header, 4x on checkout) — see §2.1/§2.2/§4.7 below.
 **Scope of this document:** Every claim below is derived from reading the
 actual source code, database schema, and migrations in this repository.
 Nothing here describes a feature that is not already implemented. Where
@@ -58,15 +72,19 @@ Composed in `src/app/page.tsx` (Server Component, `force-dynamic` — see
 
 - **Header** (`SiteHeader`): a 3-column grid — an empty spacer, the site
   logo centered in the middle column, and the icon cluster on the right.
-  The logo renders `SiteSettings.logoUrl` if the admin has uploaded one
-  (`h-14 sm:h-16 lg:h-20`, roughly 2x its pre-refinement-pass size, with a
-  `max-width` cap so an unusually wide upload can't blow out the layout),
-  otherwise falls back to the text wordmark (`Logo`) at a matching larger
-  size. Both flanking grid columns use `minmax(0,1fr)` rather than a bare
-  `1fr` — without it, the icon cluster's real content width can force that
-  column wider than the empty spacer on narrow screens, pushing the
-  "centered" logo off true center (this was an actual bug, caught and
-  fixed during this pass's mobile verification). Three icons on the right:
+  The logo renders via the shared `SiteLogo` component (`size="homepage"`,
+  `src/components/SiteLogo.tsx`) — `SiteSettings.logoUrl` if the admin has
+  uploaded one (roughly 2x its pre-refinement-pass size, with a `max-width`
+  cap so an unusually wide upload can't blow out the layout), otherwise
+  falls back to the text wordmark (`Logo`) at a matching larger size. The
+  same `SiteLogo` component (different `size` preset) also backs the
+  checkout header (§2.2, 4x this size), My Pre-order, and the order
+  confirmation page — one place to keep every logo placement in sync. Both
+  flanking grid columns use `minmax(0,1fr)` rather than a bare `1fr` —
+  without it, the icon cluster's real content width can force that column
+  wider than the empty spacer on narrow screens, pushing the "centered"
+  logo off true center (this was an actual bug, caught and fixed during
+  this pass's mobile verification). Three icons on the right:
   a Wishlist heart (♡ when empty, ❤️ once anything is saved — **new in
   Sprint 2**, was always ♡ before — badge shows the saved-item count,
   opens the wishlist drawer), a Cart bag (🛍️, badge shows total item
@@ -102,17 +120,23 @@ Composed in `src/app/page.tsx` (Server Component, `force-dynamic` — see
   product list — no
   additional network requests.
 - **Product grid**: responsive — 2 columns on mobile, 3 at the `md`
-  breakpoint (≥768px), 4 at `lg` (≥1024px). Each `ProductCard` shows: photo
-  (or a 🎀 placeholder), a wishlist heart toggle (top-right of the photo), a
-  "Sold Out" badge (top-left) when applicable, brand, name, SKU, short
-  description, estimated arrival, price (or "Price Coming Soon" in coral —
-  no longer just "Coming Soon," see §2.14), and either a quantity stepper
-  (0–10) or a "Sold Out" badge in place of it. **Collection tags are no
-  longer shown on the card** — they still exist and still drive the
-  sidebar/drawer filter above and the admin, just not the card's own
-  display (a deliberate change in this pass). Cards are visually denser
-  (smaller padding/text) than the pre-Sprint-1 design. Both the photo and
-  the name/brand/SKU/description block are wrapped in separate `<Link>`s
+  breakpoint (≥768px), 4 at `lg` (≥1024px). **Simplified in Sprint 3.5**:
+  each `ProductCard` now shows only photo (or a 🎀 placeholder), a wishlist
+  heart toggle (top-right of the photo), a "Sold Out" badge (top-left) when
+  applicable, brand, name, and price (or "Price Coming Soon" in coral) —
+  **SKU, short description, and estimated arrival no longer render on the
+  card** (they were removed outright, not moved elsewhere, per the sprint's
+  "simplify the homepage" brief; still shown on the Product Details page,
+  §2.14). A plain product shows either a quantity stepper (0–10) or a "Sold
+  Out" badge; a product with a variant group (`variantGroupName` set, §2.17)
+  shows a **"View Options"** pill button in that same spot instead — linking
+  to the Product Details page, since which variant is wanted has to be
+  chosen there before it can be wishlisted or added to the cart; the
+  wishlist heart is hidden on a variant product's card for the same reason.
+  **Collection tags are no longer shown on the card** — they still exist
+  and still drive the sidebar/drawer filter above and the admin, just not
+  the card's own display (a Sprint 2/3 change, unaffected by this sprint).
+  Both the photo and the name/brand block are wrapped in separate `<Link>`s
   to `/product/[id]` (§2.14) — kept as siblings of the wishlist heart and
   the price/quantity row, not nested inside the links, so those controls
   keep working without needing `stopPropagation`.
@@ -142,21 +166,28 @@ Composed in `src/app/page.tsx` (Server Component, `force-dynamic` — see
   plus manual opens via the header cart icon.
 - **`/checkout`** (`src/app/checkout/page.tsx` + `CheckoutForm.tsx`): fetches
   the current product catalog and `SiteSettings` server-side (so prices/
-  availability are always fresh), reads the cart from `CartContext`, and
-  shows each line with a **medium** product image, name, quantity, and
-  price, plus a total. The page header shows the admin-uploaded logo in
-  place of the old "Shokakko Australia" text (same fallback-to-text
-  pattern as `SiteHeader`, at the page's original, un-enlarged size — the
-  2x sizing in §2.1 is header-only). Below the order summary: the admin's
-  **Pre-order Information** rich text (§2.15), if any has been written,
-  then a **shipping notice** — "Tax included. Shipping fee may apply. For
-  details, please refer to our Shipping Policy." with "Shipping Policy"
-  linking to `https://www.shokakko.com.au/pages/shipping-policy` in a new
-  tab — then the same customer/shipping/billing/notes fields as before
-  (extracted into a shared `PreOrderFormFields` component), with the
-  submit button labeled **"Save My Pre-order."** Ends with the site
-  footer (§2.13a). If the cart is empty, shows a "Your cart is empty"
-  state with a link back to `/`.
+  availability are always fresh), reads the cart from `CartContext`
+  (variant-aware, §2.17), and shows each line with a **medium** product
+  image, name, a **"{Variant group}: {Variant name}"** subtitle when the
+  line has a selected variant, quantity, and price, plus a total. The page
+  header shows the `SiteLogo` component at `size="checkout"` — **4x** the
+  homepage header's own preset (same fallback-to-text pattern as
+  `SiteHeader` when no logo is uploaded). Below the order summary: the
+  admin's **Pre-order Information** rich text (§2.15), if any has been
+  written, then a **bolded shipping notice** — "**Tax included. Shipping
+  fee may apply.** For details, please refer to our Shipping Policy." with
+  "Shipping Policy" linking to
+  `https://www.shokakko.com.au/pages/shipping-policy` in a new tab — then
+  the pre-order form (`PreOrderFormFields`, shared component): **First
+  name** / **Last name** (split from the old single "Full name" field),
+  email, a **structured shipping address** — Address 1, Address 2
+  (optional), Suburb, State/Territory, Postcode, Country (defaults to
+  "Australia," editable) — a **Shipping method** selector (Standard /
+  Express), the existing "Billing address is the same as shipping"
+  checkbox (revealing the same structured fields for billing when
+  unchecked), and Notes — with the submit button labeled **"Save My
+  Pre-order."** Ends with the site footer (§2.13a). If the cart is empty,
+  shows a "Your cart is empty" state with a link back to `/`.
 - **Submission**: still the `submitPreOrder` Server Action
   (`src/app/order/actions.ts`) — validates the form, re-fetches product data
   server-side (never trusts client-submitted prices/names), generates the
@@ -210,6 +241,14 @@ not a saved-for-later list they browse after checkout.
   button that calls `toggle(productId)` — visually ♡ (not wishlisted) ↔
   ❤️ (wishlisted) — and stay in sync automatically in both modes, since
   they share the one Context.
+- **Variant-aware, Sprint 3.5**: `toggle`/`has` accept an optional
+  `variantId` (§2.17) — two different variants of the same product can
+  each be wishlisted independently, as separate `WishlistItem` rows. Called
+  with no variant id, exactly as every pre-existing call site (the card's
+  heart, the "♡ Wishlist" grid filter) still does, `has()` means "is any
+  variant of this product, or the plain product, wishlisted" — those call
+  sites needed zero changes. Only the Product Details page passes a
+  specific `variantId`.
 - **Header**: the wishlist icon itself switches ♡ → ❤️ once `count > 0`
   (new in Sprint 2, previously always ♡), in addition to the existing
   numeric badge.
@@ -417,6 +456,24 @@ drawer on first add — same mechanism the grid already used) or, once the
 item is in the cart, the same `QuantitySelector` used everywhere else in
 its place. A "← Back to shopping" link returns to `/`.
 
+**Variant selection, Sprint 3.5** (§2.17): when `product.variantGroupName`
+is set, a `VariantPills` row renders between the product type/description
+block and the price — one pill per `ProductVariant`, filled with the brand
+blue when selected, outlined when not (`src/components/catalog/
+VariantPills.tsx`). Selecting a pill is plain `useState`, no navigation and
+no network request — "the selection updates instantly." It immediately
+swaps: the **main product image** to the variant's own `imageUrl` (falling
+back to the product's own gallery/thumbnail selection if the variant has
+none — clicking a thumbnail directly clears the variant-image override
+until a different variant is picked), and the **price** to the variant's
+`priceCentsOverride` if it has one (falling back to the product's own
+price otherwise). The SKU line also falls back the same way (variant SKU,
+or the product's own SKU if the variant has none). The Wishlist toggle and
+Add to Pre-order/quantity control act on the *currently selected* variant
+— `cart.addItem(product.id, selectedVariant?.id)` / `wishlist.toggle
+(product.id, selectedVariant?.id)` — so two different variants of the same
+product are two independent cart lines / wishlist entries.
+
 Every `ProductCard` on the homepage links here (§2.1).
 
 ### 2.15 Admin: Pre-order Information rich text editor (new)
@@ -622,6 +679,142 @@ render that template against it live. Nothing is persisted.
   with no changes needed anywhere that already imports `emailService`; no
   provider is hard-coded, per your explicit instruction.
 
+### 2.17 Product Variants (Sprint 3.5)
+
+Built for a catalogue where the same product (e.g. a notebook) commonly
+comes in several designs/colours/sizes that would otherwise each need a
+separate `Product` row. Deliberately scoped to **one optional variant
+group per product** — no nested/multi-axis variants (e.g. Design *and*
+Size together) — per the sprint brief's "Current requirement."
+
+- **Admin** (`ProductVariantManager.tsx`, part of `ProductForm.tsx`): a
+  free-text **Variant group name** field ("Design," "Colour," "Style,"
+  "Size," …, same no-fixed-list pattern as `Product.type`/`brand`). No
+  variant rows render at all until a group name is typed — a blank group
+  name means "this product has no variants," and the server treats it as
+  the single source of truth for that rule even if rows exist underneath.
+  Each row: **Variant name** (required), **SKU** (optional, unique across
+  both `Product.sku` and `ProductVariant.sku`), **Price override**
+  (optional dollars — blank means "use the product's own price"), and one
+  **image** (optional — no per-variant gallery). Rows support add/remove
+  and native HTML5 drag-to-reorder (same pattern as `ProductImageManager`/
+  `BannerList`), submitted as one `variantsJson` hidden field plus a shared
+  hidden multi-file input, mirroring the existing image-manager pattern
+  exactly. **Explicitly not built** (marked "(Future)" in the brief):
+  per-variant Stock and Barcode — see §16.
+- **Customer** (§2.14): variant selection is **pills, not a dropdown**,
+  with instant, no-navigation image/price swapping.
+- **Cart & Wishlist**: both `CartContext` and `WishlistContext` key their
+  state by a composite `"${productId}::${variantId}"` string when a
+  variant is involved (`buildCartKey`/`parseCartKey`, exported from
+  `CartContext.tsx`) — a plain product's key is unchanged (`productId`
+  alone), so every pre-existing call site needed zero changes. The Cart
+  drawer, Wishlist drawer, and checkout item list all resolve a line's
+  variant via this key and show a **"{Variant group}: {Variant name}"**
+  subtitle under the product name.
+- **Order submission**: `submitPreOrder` re-fetches the real
+  `ProductVariant` row server-side (never trusts client data) and
+  snapshots `variantId` (live reference) plus `variantName` (permanent
+  snapshot, same "snapshot vs. live-reference" pattern as `productName` —
+  §17) and the variant's price-override-or-product-price onto each
+  `OrderItem`. This is the **only** checkout-adjacent change this sprint —
+  the checkout flow's own steps/fields/UX are untouched.
+- **Admin order display**: every item row on the admin pre-order detail
+  page and the customer's own order confirmation page shows a
+  "{Variant group}: {Variant name}" line under the product name whenever
+  the order item has one — e.g. "Notebook" / "Design: Bear" — satisfying
+  the brief's explicit requirement that admin orders clearly show which
+  variant was ordered, not just the base product name.
+
+### 2.18 Admin: Purchase Dashboard (`/admin/purchases`, new)
+
+**Purpose, in Karen's words**: help her buy products efficiently while
+physically walking around an exhibition. **Mobile-first** — designed for
+her iPhone first, with full desktop support as well.
+
+- **Scope**: the Buying List (below) covers every distinct
+  product/variant combination that appears in **at least one submitted
+  pre-order** — not the whole catalogue — since "Requested Quantity" and
+  "Number of Customers" only mean something for items customers actually
+  asked for (confirmed with you during planning).
+- **Summary tiles**: Total Products, Products Without Price, Draft
+  Products, Sold Out Products, Total Wishlist Items, Total Pre-orders, and
+  **Average Order Size** (total `OrderItem` quantity ÷ number of
+  `PreOrder`s — a dollar-value average would be misleading while many
+  products have no price yet).
+- **Purchase Progress**: a `bg-blue`-filled bar over a `bg-mint` track
+  showing the percentage of buying-list rows marked Purchased, plus
+  "Purchased X/Y Products" and "Remaining Z Products" text.
+- **Buying List** (`PurchaseBuyingList.tsx`, client): stacked cards below
+  the `md` breakpoint, an actual `<table>` from `md:` up (and forced into
+  table layout when printing, regardless of screen width) — each row shows
+  product photo, product name, variant name (if any), requested quantity,
+  number of distinct customers, and a purchase-status `<select>`. Filters
+  (Brand, Collection, Product Type, Product Status, Purchased Status —
+  multi-select chips) and sort (Quantity / Brand / Collection / Product
+  Name) are client-side state over the already-fetched list, the same
+  "fetch once, filter in the browser" approach `ProductBrowser` already
+  established for the customer catalog.
+- **Purchase status**: **Not Purchased** / **Partially Purchased** /
+  **Purchased**, stored directly on `Product.purchaseStatus` (a
+  variant-less product) or `ProductVariant.purchaseStatus` (a variant),
+  updated via `updatePurchaseStatus` (optimistic `<select>` + Server
+  Action + `revalidatePath`, the same pattern `StatusSelect.tsx` already
+  established for pre-order status) — **"Status should persist"** is
+  satisfied by writing straight to the database, not client-only state.
+- **CSV Export**: builds a CSV string client-side from the currently
+  filtered/sorted rows and triggers a download via `Blob` +
+  `URL.createObjectURL` + a temporary `<a download>` click — no new
+  dependency, no server round trip.
+- **Print-Friendly View**: a "Print" button calling `window.print()`; a
+  new `@media print` block in `globals.css` hides the admin header/nav and
+  the dashboard's summary tiles/filters/buttons (each tagged
+  `print:hidden`), leaving just a clean table of the buying list — the
+  Buying List's mobile card layout is also forced into its desktop
+  `<table>` form when printing (`print:block`), regardless of the actual
+  screen width, so a phone print/share still produces a real table.
+
+### 2.19 Admin: Analytics Dashboard (`/admin/analytics`, new)
+
+A single read-only Server Component surfacing customer-behaviour signals
+from wishlist and pre-order activity — helps Karen see what customers are
+interested in, not just what they've committed to buying. Every list below
+is computed from two single-pass queries (all `WishlistItem`s and all
+`OrderItem`s, each joined to their `Product`) rather than one database
+`groupBy` per section, then aggregated/sorted in JavaScript — simpler to
+keep correct than juggling many separate relation-spanning aggregations,
+and the dataset is boutique-event-sized, not web-scale.
+
+- **Most Wishlisted Products** / **Most Wishlisted Brands** / **Most
+  Wishlisted Collections** — ranked by `WishlistItem` count (product-level,
+  not per-variant — a product's total interest across all its variants
+  combined).
+- **Most Added To Pre-order** / **Most Popular Brands** / **Most Popular
+  Collections** — the same shape, but ranked by total `OrderItem` quantity
+  instead of wishlist count: interest vs. actual commitment, two different
+  signals, deliberately shown side by side.
+- **Products Waiting For Price** — products with `priceCents: null`,
+  ranked by wishlist count descending, so the ones customers care about
+  most bubble to the top of Karen's to-price list.
+- **High Interest Products** — a plain, documented heuristic:
+  `wishlistCount − orderedQuantity`, descending, filtered to a positive
+  score — "customers like this but haven't committed to buying it yet."
+  Not a hidden magic number; easy to adjust later if needed.
+- **Recent Activity** — the most recent 20 rows from the new `ActivityLog`
+  table (§4.7c), reverse-chronological, with a small icon per type (🆕
+  product added, 💲 price updated, 🧾 order submitted, ♡ wishlist added).
+  **Known gap**: a wishlist add made *before* a customer's browser is
+  "linked" (§2.3 — i.e. before their first pre-order submission) never
+  calls the `toggleWishlistItem` Server Action, so it never logs an
+  activity row — only wishlist adds from an already-linked browser do.
+  This doesn't affect the wishlist **data** itself (that first-time add
+  still correctly becomes a real `WishlistItem` row once the customer
+  checks out, via the existing migration step, §2.3) or any of the
+  "Most Wishlisted" lists above, which query `WishlistItem` directly — it
+  only means Recent Activity under-represents first-time wishlist adds.
+  Deliberate scope boundary, not a bug: the approved plan named exactly
+  `toggleWishlistItem`'s create branch as the trigger point.
+
 ---
 
 ## 3. Screens (complete list, exactly as they behave today)
@@ -652,6 +845,8 @@ render that template against it live. Nothing is persisted.
 | Admin settings | `/admin/settings` | Admin session required | Logo/event/countdown form + Email settings (§2.10, §2.16.4) |
 | Admin pre-order list | `/admin/preorders` | Admin session required | Pre-order table |
 | Admin pre-order detail | `/admin/preorders/[id]` | Admin session required | Full order detail |
+| Admin Purchase Dashboard | `/admin/purchases` | Admin session required | Summary tiles, progress bar, mobile-first Buying List with filters/sort/CSV/print (§2.18) |
+| Admin Analytics Dashboard | `/admin/analytics` | Admin session required | Wishlist/order interest signals, Recent Activity feed (§2.19) |
 | 404 (not found) | any unmatched path | Public | Next.js's default, unstyled not-found page — still no custom `not-found.tsx` |
 
 ---
@@ -679,16 +874,44 @@ expand-then-contract sequence (§4.7).
 | `sortOrder` | `Int` | Default `0`; ascending sort key |
 | `isNew` | `Boolean` | **New in Sprint 3**, default `false` — manual "🆕 Mark as New" admin toggle for the Update Email's New Products section (§2.16.4) |
 | `lastNotifiedPriceCents` | `Int?` | **New in Sprint 3** — Price Updates baseline; seeded to `priceCents` on create, advanced only by "Generate Email" (§2.16.3) |
+| `variantGroupName` | `String?` | **New in Sprint 3.5** — free text ("Design," "Colour," …); `null` = this product has no variants (§2.17) |
+| `purchaseStatus` | `String` | **New in Sprint 3.5**, default `"not_purchased"` — Purchase Dashboard checklist status, used only for a variant-less product (§2.18) |
 | `createdAt` / `updatedAt` | `DateTime` | Auto-managed |
 | `images` | `ProductImage[]` | **New in Sprint 1** — replaces the removed `imageUrl` string |
 | `tags` | `Tag[]` | Implicit many-to-many |
+| `variants` | `ProductVariant[]` | **New in Sprint 3.5** — see §4.1a |
 | `orderItems` | `OrderItem[]` | One-to-many |
+| `wishlistItems` | `WishlistItem[]` | One-to-many |
 | `digestItems` | `EmailDigestItem[]` | **New in Sprint 3** — see §4.7b |
 | `recommendedInDigests` | `EmailDigest[]` | **New in Sprint 3** — digests that featured this product under Karen's Picks |
 
 `imageUrl` and `isActive` **no longer exist** on this model — removed in a
 follow-up migration after their data was backfilled into `images`/`status`
 (see §4.7).
+
+### 4.1a `ProductVariant` (new in Sprint 3.5)
+
+One row per pill option under a product's single variant group
+(`Product.variantGroupName`) — deliberately flat, one group per product,
+not a separate `VariantGroup` model, matching the brief's "Current
+requirement: Support ONE Variant Group per product" (§2.17).
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `String` (cuid) | Primary key |
+| `productId` | `String` | FK → `Product.id`, `onDelete: Cascade` |
+| `name` | `String` | "Cat," "Bear," "Rabbit," … |
+| `sku` | `String?` | Optional, `@unique` when set — nullable-unique is fine on SQLite (every `NULL` is distinct), same precedent as `PreOrder.editToken` |
+| `priceCentsOverride` | `Int?` | `null` = use the parent `Product`'s own `priceCents` |
+| `imageUrl` | `String?` | One image per variant (no gallery) — swaps in as the main product photo on selection |
+| `sortOrder` | `Int` | Default `0` — admin-controlled pill display order |
+| `purchaseStatus` | `String` | Default `"not_purchased"` — Purchase Dashboard checklist status for this specific variant (§2.18) |
+| `createdAt` | `DateTime` | Auto-set |
+| `orderItems` | `OrderItem[]` | One-to-many |
+| `wishlistItems` | `WishlistItem[]` | One-to-many |
+
+**Explicitly not built** (marked "(Future)" in the sprint brief, and not
+blocked by this shape): per-variant Stock and Barcode fields — see §16.
 
 ### 4.2 `ProductImage` (new in Sprint 1)
 
@@ -752,9 +975,29 @@ had no image at all before this sprint.
 
 ### 4.7 `PreOrder` / `OrderItem`
 
-Structurally unchanged from before Sprint 1 for `OrderItem` (still
-snapshotting product details with a nullable `productId`/`SetNull`). `
-PreOrder` gained two things in Sprint 2:
+`PreOrder`'s customer/address shape was restructured in the previous
+session's **Checkout & Logo Polish** pass (undocumented until now — folded
+in as part of this sprint's docs update, per §"Version" above):
+
+| Field | Type | Notes |
+|---|---|---|
+| `customerFirstName` / `customerLastName` | `String` | Replaces the old single `customerName` "Full name" field |
+| `shippingAddress1` / `shippingAddress2` | `String` / `String?` | Address 1 required, Address 2 optional — replaces the old single free-text `shippingAddress` field |
+| `shippingSuburb` / `shippingState` / `shippingPostcode` | `String` | Required |
+| `shippingCountry` | `String` | Default `"Australia"`, editable for international orders |
+| `billingAddress1`/`2`/`Suburb`/`State`/`Postcode`/`Country` | all `String?` | Same shape as shipping, every field nullable — `null` across the board means "same as shipping" (the checkout form's default) |
+| `shippingMethod` | `String` | Default `"standard"` — `"standard"` \| `"express"`, chosen at checkout |
+
+`OrderItem` remains structurally the same snapshotting shape from before
+Sprint 1 (nullable `productId`/`SetNull`), plus two Sprint 3.5 additions
+(§2.17):
+
+| Field | Type | Notes |
+|---|---|---|
+| `variantId` | `String?` | **New in Sprint 3.5** — FK → `ProductVariant.id`, `SetNull`. Live reference to which variant was ordered, if any |
+| `variantName` | `String?` | **New in Sprint 3.5** — permanent snapshot of the chosen variant's name (e.g. "Bear"), same reasoning as `productName` — so "Notebook / Design: Bear" still displays correctly even if the variant is later renamed or deleted |
+
+`PreOrder` itself gained:
 
 | Field | Type | Notes |
 |---|---|---|
@@ -773,15 +1016,21 @@ generated (§2.7) — the column didn't change shape.
 | `id` | `String` (cuid) | Primary key |
 | `preOrderId` | `String` | FK → `PreOrder.id`, `onDelete: Cascade` |
 | `productId` | `String` | FK → `Product.id`, `onDelete: Cascade` |
+| `variantId` | `String?` | **New in Sprint 3.5** — FK → `ProductVariant.id`, `SetNull`, live reference (not a snapshot, same reasoning as `productId`) — which variant was wishlisted, if any (§2.17) |
 | `addedAt` | `DateTime` | Auto-set |
 
-`@@unique([preOrderId, productId])` prevents duplicate rows for the same
-product on the same order. Deliberately **not** a snapshot (contrast with
-`OrderItem`) — the wishlist's whole purpose is live status, so it's a
-plain reference to the current `Product` row; if the product is deleted,
-its `WishlistItem` rows cascade-delete with it. Tied to `PreOrder`, not a
-new `Customer` entity, to keep today's accountless model intact — see the
-future-compatibility note in §16.
+`@@unique([preOrderId, productId, variantId])` (extended in Sprint 3.5 to
+include `variantId`) prevents duplicate rows for the same product+variant
+combination on the same order — two different variants of the same
+product can each be wishlisted independently, as separate rows.
+Deliberately **not** a snapshot (contrast with `OrderItem`) — the
+wishlist's whole purpose is live status, so it's a plain reference to the
+current `Product`/`ProductVariant` row; if the product is deleted, its
+`WishlistItem` rows cascade-delete with it, and if just the variant is
+deleted, the row falls back to pointing at the base product (`SetNull`)
+rather than vanishing. Tied to `PreOrder`, not a new `Customer` entity, to
+keep today's accountless model intact — see the future-compatibility note
+in §16.
 
 ### 4.7b `EmailDigest` / `EmailDigestItem` (new in Sprint 3)
 
@@ -812,6 +1061,29 @@ is captured per item with `kind` (`"new"` \| `"price_update"`),
 `OrderItem` vs. `WishlistItem`, so a digest's history stays accurate even
 if the product's price changes again afterward, or the product is deleted
 (`productId` is nullable, `SetNull`).
+
+### 4.7c `ActivityLog` (new in Sprint 3.5)
+
+A small, generic activity feed backing the Analytics Dashboard's "Recent
+Activity" section (§2.19) — deliberately **not** a full audit log (no
+before/after diffing, no actor tracking, since there's only ever one
+admin).
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `String` (cuid) | Primary key |
+| `type` | `String` | `"product_added"` \| `"price_updated"` \| `"order_submitted"` \| `"wishlist_added"` |
+| `message` | `String` | Short human-readable line, e.g. "Midori Notebook price changed to $12.50" |
+| `productId` | `String?` | Plain nullable string, deliberately **not** an FK/cascade — a deleted product never needs its history rewritten or removed |
+| `createdAt` | `DateTime` | Auto-set |
+
+Fed by exactly four insert points, each wrapped in `.catch(() => {})` so a
+logging failure never blocks the real write it's attached to:
+`createProduct` (`product_added`), `updateProduct` — only when
+`priceCents` actually changes (`price_updated`), `submitPreOrder`
+(`order_submitted`), and `toggleWishlistItem`'s create branch
+(`wishlist_added` — see §2.19's Recent Activity note for the one known gap
+this last trigger point has).
 
 ### 4.8 Migration history (Sprint 1's expand-then-contract sequence)
 
@@ -845,22 +1117,32 @@ tables (`EmailDigest`, `EmailDigestItem`) plus three new join tables for
 the digest's many-to-many relations — nothing existing removed or
 reshaped, `prisma migrate dev` applied it directly with no manual
 workaround needed this time (no NULL-vs-UNIQUE warning to route around).
+**Sprint 3.5** was additive again: two new columns on `Product`
+(`variantGroupName`, `purchaseStatus`), one new `ProductVariant` table,
+one new nullable `variantId` column each on `WishlistItem`/`OrderItem`
+(plus `OrderItem.variantName`), and one new `ActivityLog` table —
+`prisma migrate dev` applied cleanly on the first attempt, preserving all
+existing data.
 
 ### 4.9 Entity relationships
 
 ```
 Product ──(many-to-many)── Tag
 Product ──(one-to-many, cascade on delete)── ProductImage
+Product ──(one-to-many, cascade on delete)── ProductVariant
 Product ──(one-to-many, optional FK, SetNull on delete)── OrderItem
 Product ──(one-to-many, cascade on delete)── WishlistItem
 Product ──(one-to-many, optional FK, SetNull on delete)── EmailDigestItem
 Product ──(many-to-many)── EmailDigest (recommendedProducts)
+ProductVariant ──(one-to-many, optional FK, SetNull on delete)── OrderItem
+ProductVariant ──(one-to-many, optional FK, SetNull on delete)── WishlistItem
 Tag ──(many-to-many)── EmailDigest (collections)
 PreOrder ──(one-to-many, cascade on delete)── OrderItem
 PreOrder ──(one-to-many, cascade on delete)── WishlistItem
 PreOrder ──(many-to-many)── EmailDigest (recipients)
 EmailDigest ──(one-to-many, cascade on delete)── EmailDigestItem
-HeroBanner, SiteSettings, OrderSequence — standalone, no FKs
+HeroBanner, SiteSettings, OrderSequence, ActivityLog — standalone, no FKs
+  (ActivityLog.productId is a plain nullable string, not a real FK)
 ```
 
 Still no `User`/`Customer`/`Account` table — the admin identity remains a
@@ -881,16 +1163,17 @@ directory. Every write is a Next.js Server Action.
 |---|---|---|---|
 | `loginAction` | `admin/login/actions.ts` | None | Verifies password, sets session cookie |
 | `logoutAction` | `admin/(protected)/actions.ts` | Admin session (via layout) | Clears session cookie |
-| `createProduct` / `updateProduct` / `deleteProduct` | `admin/(protected)/products/actions.ts` | `requireAdmin()` | Product CRUD, now including multi-image resolution (§2.8) |
+| `createProduct` / `updateProduct` / `deleteProduct` | `admin/(protected)/products/actions.ts` | `requireAdmin()` | Product CRUD, now including multi-image resolution (§2.8) and variant-row resolution (§2.17) — also feeds `ActivityLog` (`product_added`, and `price_updated` when `priceCents` actually changes) |
 | `createBanner` / `updateBanner` / `deleteBanner` | `admin/(protected)/banners/actions.ts` | `requireAdmin()` | Banner CRUD, enforces the 5-banner cap on create |
 | `toggleBannerActive` | same file | `requireAdmin()` | Single-field enable/disable, used by the drag-list's inline toggle |
 | `reorderBanners` | same file | `requireAdmin()` | Batch `sortOrder` update from a drag-and-drop reorder |
 | `updateSiteSettings` | `admin/(protected)/settings/actions.ts` | `requireAdmin()` | Upserts the `SiteSettings` singleton, now including `preorderInfoHtml` |
 | `updatePreOrderStatus` | `admin/(protected)/preorders/actions.ts` | `requireAdmin()` | Updates `PreOrder.status` |
-| `submitPreOrder` | `app/order/actions.ts` | None (public) | Validates, re-fetches products server-side, generates the next sequential order number and a secure `editToken`, creates the order + wishlist migration (§2.3), sets the `shokakko_preorder_token` cookie |
-| `toggleWishlistItem` | `components/wishlist/actions.ts` | None (public — scoped by the caller's cookie-derived token, not a login) | **New in Sprint 2.** Looks up the `PreOrder` by `editToken`, no-ops silently if not found, otherwise creates/deletes the matching `WishlistItem` row. Called by `WishlistContext` only once a wishlist is in linked mode (§2.3) |
+| `submitPreOrder` | `app/order/actions.ts` | None (public) | Validates, re-fetches products **and variants** server-side, generates the next sequential order number and a secure `editToken`, creates the order (snapshotting each item's variant, §2.17) + wishlist migration (§2.3), sets the `shokakko_preorder_token` cookie, feeds `ActivityLog` (`order_submitted`) |
+| `toggleWishlistItem` | `components/wishlist/actions.ts` | None (public — scoped by the caller's cookie-derived token, not a login) | **New in Sprint 2**, extended in Sprint 3.5 with an optional `variantId` parameter. Looks up the `PreOrder` by `editToken`, no-ops silently if not found, otherwise creates/deletes the matching `WishlistItem` row (validating the variant actually belongs to the product first) and, on create, feeds `ActivityLog` (`wishlist_added`, §2.19). Called by `WishlistContext` only once a wishlist is in linked mode (§2.3) |
 | `generateEmail` | `admin/(protected)/emails/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Saves the Notification Centre form onto the current draft `EmailDigest`, computes/snapshots New Products + Price Updates, advances `Product.lastNotifiedPriceCents`, computes recipients, renders + saves `renderedHtml` (§2.16.3). Never calls `emailService.send()` |
 | `updateTagImage` | `admin/(protected)/collections/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Uploads/removes a `Tag`'s square Collection Card image |
+| `updatePurchaseStatus` | `admin/(protected)/purchases/actions.ts` | `requireAdmin()` | **New in Sprint 3.5.** Updates `Product.purchaseStatus` or `ProductVariant.purchaseStatus` (whichever applies) for one Buying List row (§2.18) |
 
 Still no API rate limiting, no API key/token auth, no separate backend
 service — the "API" and the web app remain the same Next.js process.
@@ -935,11 +1218,16 @@ src/
 │   └── admin/
 │       ├── login/                 Unchanged
 │       └── (protected)/
-│           ├── layout.tsx           Nav includes Banners/Collections/Emails/Settings
+│           ├── layout.tsx           Nav includes Banners/Collections/Emails/
+│           │                         Purchases/Analytics/Settings (Sprint 3.5)
 │           ├── products/            Extended: type/status, ProductImageManager,
-│           │                         + isNew "Mark as New" checkbox (Sprint 3)
+│           │                         + isNew "Mark as New" checkbox (Sprint 3);
+│           │                         + ProductVariantManager.tsx (Sprint 3.5, §2.17)
 │           ├── banners/             list/new/[id]/actions/BannerForm/BannerList
 │           ├── collections/         NEW (Sprint 3) — Tag list + TagImageForm.tsx
+│           ├── purchases/           NEW (Sprint 3.5) — page.tsx, PurchaseBuyingList.tsx,
+│           │                         actions.ts (updatePurchaseStatus) — §2.18
+│           ├── analytics/           NEW (Sprint 3.5) — page.tsx, read-only (§2.19)
 │           ├── emails/              NEW (Sprint 3) — Notification Centre:
 │           │   ├── page.tsx           draft editor + live preview
 │           │   ├── NotificationCentreForm.tsx
@@ -949,7 +1237,8 @@ src/
 │           │   └── reminder/          Reminder Email preview (pick an order)
 │           ├── settings/            + PreorderInfoEditor.tsx (Tiptap);
 │           │                         + Email settings section (Sprint 3)
-│           └── preorders/           Unchanged
+│           └── preorders/           + shows a "{Variant group}: {Variant}" line
+│                                     per item when present (Sprint 3.5, §2.17)
 ├── components/
 │   ├── Logo.tsx                    Unchanged text wordmark (fallback when no logo uploaded)
 │   ├── ui/
@@ -969,20 +1258,29 @@ src/
 │   │   ├── HeroCarousel.tsx         Responsive picture-based rotation
 │   │   └── EventInfoStrip.tsx       Event info + live countdown
 │   ├── cart/
-│   │   ├── CartContext.tsx          localStorage-persisted cart state (unchanged)
-│   │   ├── CartDrawer.tsx
+│   │   ├── CartContext.tsx          localStorage-persisted cart state;
+│   │   │                             Sprint 3.5 — composite `${productId}::${variantId}`
+│   │   │                             keys, buildCartKey/parseCartKey exported (§2.17)
+│   │   ├── CartDrawer.tsx           + resolves each line's variant for display (Sprint 3.5)
 │   │   └── ClearCartOnMount.tsx
 │   ├── wishlist/
 │   │   ├── WishlistContext.tsx      Sprint 2 — dual-mode (local/linked); public
 │   │   │                             API unchanged, so every consumer below is
-│   │   │                             unaffected by the mode switch
+│   │   │                             unaffected by the mode switch; Sprint 3.5 —
+│   │   │                             has()/toggle() take an optional variantId (§2.3)
 │   │   ├── WishlistDrawer.tsx       Sprint 2 — bottom-sheet on mobile, Brand +
 │   │   │                             live Product Status per row, "Move to
-│   │   │                             Pre-order" (was "Add to cart")
-│   │   └── actions.ts               NEW (Sprint 2) — toggleWishlistItem Server Action
+│   │   │                             Pre-order" (was "Add to cart"); Sprint 3.5 —
+│   │   │                             resolves each line's variant for display
+│   │   └── actions.ts               NEW (Sprint 2) — toggleWishlistItem Server Action;
+│   │                                  Sprint 3.5 — optional variantId param + ActivityLog insert
 │   └── catalog/
-│       ├── types.ts                  CatalogProduct: images[]/type/status replace imageUrl/isActive
-│       ├── ProductCard.tsx           No tag badges; links to /product/[id]; "Price Coming Soon"
+│       ├── types.ts                  CatalogProduct: images[]/type/status replace imageUrl/isActive;
+│       │                              + variantGroupName/variants (Sprint 3.5)
+│       ├── ProductCard.tsx           No tag badges; links to /product/[id]; "Price Coming Soon";
+│       │                              Sprint 3.5 — no SKU/estimated arrival; "View Options"
+│       │                              button in place of heart+stepper on a variant product (§2.1)
+│       ├── VariantPills.tsx          NEW (Sprint 3.5) — filled/outline pill selector (§2.17)
 │       ├── ProductBrowser.tsx        Owns search/sort/filter state, renders the
 │       │                              grid; + wishlistOnly filter condition (Sprint 2)
 │       ├── ProductToolbar.tsx        Search + sort
@@ -990,15 +1288,21 @@ src/
 │       │                              + "♡ Wishlist" checkbox (Sprint 2)
 │       ├── FilterSidebar.tsx         Desktop wrapper around FilterGroups
 │       ├── FilterDrawer.tsx          Mobile wrapper (uses Drawer)
-│       ├── PreOrderFormFields.tsx    Extracted from the old OrderForm
+│       ├── PreOrderFormFields.tsx    Extracted from the old OrderForm; restructured
+│       │                              for First/Last name + structured address +
+│       │                              shipping method (Checkout & Logo Polish pass)
 │       └── QuantitySelector.tsx      Extended with a `size` prop (sm/md)
+├── SiteLogo.tsx                    NEW (Checkout & Logo Polish pass) — shared
+│                                     homepage/checkout/compact logo presets (§2.1)
 └── lib/
     ├── db.ts, auth.ts, session.ts    Unchanged
     ├── order-number.ts               Sequential PO#### generator
     ├── edit-token.ts                 NEW (Sprint 2) — generateEditToken() via nanoid
     ├── wishlist.ts                   NEW (Sprint 2) — getLinkedWishlist(token), the
-    │                                  shokakko_preorder_token cookie name/TTL constants
-    ├── catalog.ts                    Shared Prisma-row → CatalogProduct mapper
+    │                                  shokakko_preorder_token cookie name/TTL constants;
+    │                                  Sprint 3.5 — returns composite variant-aware keys
+    ├── catalog.ts                    Shared Prisma-row → CatalogProduct mapper;
+    │                                  + variants mapping (Sprint 3.5)
     ├── storage/                      Unchanged interface, more call sites
     ├── email/                        NEW (Sprint 3) — see §2.16
     │   ├── types.ts, console.ts, index.ts   EmailService interface + no-op driver
@@ -1019,8 +1323,15 @@ src/
     │       └── OrderSummary.tsx, Countdown.tsx   (template-specific, not shared)
     └── validations/
         ├── product.ts                 type/status; PRODUCT_STATUSES union;
-        │                               + isNew field (Sprint 3)
-        ├── order.ts                   generateOrderNumber() removed (superseded)
+        │                               + isNew field (Sprint 3);
+        │                               + variantGroupName field (Sprint 3.5)
+        ├── variant.ts                  NEW (Sprint 3.5) — variantFormSchema/
+        │                               variantsFormSchema (§2.17)
+        ├── purchase.ts                 NEW (Sprint 3.5) — PURCHASE_STATUSES,
+        │                               PURCHASE_STATUS_LABELS (§2.18)
+        ├── order.ts                   generateOrderNumber() removed (superseded);
+        │                               restructured for First/Last name +
+        │                               structured address (Checkout & Logo Polish pass)
         ├── banner.ts
         ├── settings.ts                + preorderInfoHtml field;
         │                               + email settings fields (Sprint 3)
@@ -1031,8 +1342,9 @@ src/
 **Removed in Sprint 1**: `components/catalog/OrderSheet.tsx`,
 `CartBar.tsx`, `TagFilter.tsx`, `OrderForm.tsx` — all superseded by the
 components listed above. Nothing was removed in the UI Refinement Pass,
-Sprint 2, or Sprint 3 — every change across all three was additive or
-in-place.
+Sprint 2, Sprint 3, or Sprint 3.5 — every change across all four was
+additive or in-place (Sprint 3.5's homepage card simplification, §2.1,
+removed *fields from a card's display*, not a component).
 
 State management: still no global state library. Two React Contexts
 (`CartContext`, `WishlistContext`) exist for state that genuinely needs to
@@ -1098,6 +1410,15 @@ elements, not a bundled component library — see §2.16.1 for why
 `@react-email/components` was deliberately avoided). No email-sending
 package was added — `EmailService` (§2.16.4) has exactly one
 implementation this sprint, a console-logging no-op.
+
+**Sprint 3.5 added zero new dependencies.** Variant pills, the composite
+cart/wishlist keying, CSV export, and print styles are all built from
+framework/browser primitives already established elsewhere in this
+codebase: `useState` (pills, same pattern as every other client toggle),
+`Blob`/`URL.createObjectURL`/a temporary `<a download>` (CSV, the standard
+vanilla approach — no CSV precedent existed anywhere in the codebase
+before this sprint), `window.print()` + a `@media print` CSS block (first
+one in the project), and Tailwind's built-in `print:` variant.
 
 ## 8. Project Structure (top level)
 
@@ -1448,6 +1769,32 @@ New or changed in Sprint 3:
     dimension checks elsewhere (§14 item 2/§16); only file type/size are
     validated.
 
+New or changed in Sprint 3.5:
+
+20. **Recent Activity under-represents first-time wishlist adds** — a
+    wishlist add made before a customer's browser is "linked" (before
+    their first pre-order submission) never calls the `toggleWishlistItem`
+    Server Action, so it's never logged to `ActivityLog`; only wishlist
+    adds from an already-linked, returning browser show up in Recent
+    Activity. The underlying wishlist **data** is unaffected — the item
+    still correctly becomes a real `WishlistItem` row via the existing
+    migration step at checkout, and every "Most Wishlisted" list on the
+    Analytics Dashboard queries `WishlistItem` directly, not the log. A
+    deliberate scope boundary (§2.19), not a bug.
+21. **A product's purchase status has no bulk-update path** — the
+    Purchase Dashboard's status `<select>` updates one product/variant row
+    at a time; marking many rows Purchased at once (e.g. after a big
+    buying pass) requires clicking through each one. See the Bulk admin
+    actions idea in §16.
+22. **The Buying List's "Number of Customers" relies on a cart invariant,
+    not an explicit distinct-count query** — it's mathematically derived
+    from `OrderItem.groupBy`'s row count for a given product+variant,
+    which is only correct because the cart never allows more than one
+    quantity per product+variant per single checkout (true today, and
+    true for every order placed so far) — worth revisiting if that
+    invariant ever changes (e.g. a future "add the same variant twice as
+    separate lines" feature).
+
 ---
 
 ## 15. Planned Features
@@ -1467,8 +1814,12 @@ excluded on purpose:
   page the token already points at (§2.5/§2.6). Every email template's
   CTA/edit link already points at this URL; the route it resolves to
   still doesn't exist.
-- **CSV export** of pre-orders from the admin, for offline fulfillment
-  planning.
+- **CSV export of pre-orders themselves** from the admin pre-order list,
+  for offline fulfillment planning — **not** built this sprint. Sprint 3.5
+  added CSV export, but scoped to the Purchase Dashboard's Buying List
+  (§2.18), a different export with different columns; the underlying
+  `Blob`/download mechanic is generic and could be reused for a pre-order
+  export later.
 - **A real `EmailService` driver** (Sprint 4-scoped, per your explicit
   Sprint 3 answer) — Resend, Brevo, SES, or similar, implementing the
   interface already defined in `src/lib/email/types.ts` (§2.16.4). This
@@ -1551,6 +1902,41 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
   themselves are still only created via the product form's comma-separated
   field, so cleanup of stray/duplicate tags (§14 item 18) is still manual,
   database-level work today.
+- **Named directly in the Sprint 3.5 brief's "Future Compatibility"
+  section, explicitly not built this sprint** — kept here as a note of
+  where the current schema would and wouldn't need to change:
+  - *Stock Management* / *Barcode*: `ProductVariant` already has the exact
+    shape these would extend — two more nullable columns (`stock: Int?`,
+    `barcode: String?`), no restructuring, matching the brief's explicit
+    "(Future)" marking on both (§2.17/§4.1a).
+  - *Supplier Management* / *Purchase Cost*: neither needs a change to
+    `Product`/`ProductVariant` — a future `Supplier` model and a
+    `purchaseCostCents` column would sit alongside the existing purchasing
+    fields without touching the customer-facing schema at all.
+  - *Wholesale Portal*: like the Sprint 2 note on a Wholesale Catalogue,
+    most likely a second `Product`-like surface (a flag, or a parallel
+    model) rather than a change to `CartContext`/`WishlistContext` — neither
+    assumes there's only one catalogue or one price per product (variant
+    price overrides, §2.17, already establish that a product can have more
+    than one price today).
+  - *Conversion Rate*: would live as a computed metric over existing data
+    (wishlist count vs. order count per product — the exact numbers the
+    Analytics Dashboard's High Interest Products already computes, §2.19)
+    rather than needing a new stored field.
+  - *Email Analytics*: open opens/clicks tracking would need new columns on
+    a sent email/recipient record — `EmailDigest`'s `status` already has an
+    unused `"sent"` value reserved for exactly this kind of future
+    per-send tracking (§4.7b).
+  - *Multiple Events*: unchanged from the Sprint 2 note already on file —
+    a future `Event` model could sit between `Product` and everything else
+    without reshaping `ProductVariant`/`WishlistItem`/`OrderItem`, none of
+    which assume a single global "the current event."
+  - **Purchase status as a plain field, not a join table** (`Product.
+    purchaseStatus`/`ProductVariant.purchaseStatus`, §2.18): a deliberate
+    choice this sprint to sidestep SQLite's NULL-isn't-equal-to-NULL
+    unique-constraint pitfall entirely. A future purchase-order/supplier
+    model could absorb this later without touching the customer-facing
+    schema, since nothing customer-visible reads these two fields.
 
 ---
 
@@ -1607,3 +1993,26 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
   (`src/lib/email/types.ts`) every future email provider will implement —
   same role as `StorageAdapter`. Its only implementation this sprint is a
   no-op that logs instead of sending (§2.16.4).
+- **Variant** / **Variant group**: a product's single optional group of
+  pill-selectable options (e.g. "Design" → Cat/Bear/Rabbit), each its own
+  `ProductVariant` row with an optional SKU, price override, and image
+  (§2.17, §4.1a). Not the same concept as "Product Type" or "Product
+  Collection" — those are catalogue taxonomy, a variant is a specific
+  purchasable option *within* one product listing.
+- **Buying List**: the Purchase Dashboard's core table — every distinct
+  product/variant combination that appears in at least one submitted
+  pre-order, with requested quantity, customer count, and a purchase
+  status the admin can update while physically shopping (§2.18).
+- **Purchase status**: **Not Purchased** / **Partially Purchased** /
+  **Purchased** — Karen's own buying checklist state per product/variant,
+  entirely separate from `PreOrder.status` (new/confirmed/fulfilled/
+  cancelled, which tracks a customer's order) and from `Product.status`
+  (active/draft/sold_out, which tracks catalogue visibility) — three
+  independent status fields answering three different questions (§2.18).
+- **`ActivityLog`** / **Recent Activity**: a small, generic event feed
+  (product added, price updated, order submitted, wishlist added) fed by
+  four write points, shown reverse-chronologically on the Analytics
+  Dashboard — deliberately not a full audit log (§4.7c, §2.19).
+- **High Interest Products**: a documented heuristic on the Analytics
+  Dashboard — `wishlistCount − orderedQuantity`, descending — surfacing
+  products customers save but haven't committed to ordering yet (§2.19).

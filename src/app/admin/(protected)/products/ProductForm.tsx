@@ -6,6 +6,7 @@ import { Field, inputClass } from "@/components/ui/Field";
 import { centsToDollars } from "@/lib/validations/product";
 import type { ProductFormState } from "./actions";
 import { ProductImageManager } from "./ProductImageManager";
+import { ProductVariantManager } from "./ProductVariantManager";
 
 type ProductDefaults = {
   brand: string;
@@ -20,6 +21,8 @@ type ProductDefaults = {
   tags: string[];
   images: { id: string; url: string }[];
   isNew: boolean;
+  variantGroupName: string;
+  variants: { id: string; name: string; sku: string | null; priceCents: number | null; imageUrl: string | null }[];
 };
 
 const emptyDefaults: ProductDefaults = {
@@ -35,6 +38,8 @@ const emptyDefaults: ProductDefaults = {
   tags: [],
   images: [],
   isNew: false,
+  variantGroupName: "",
+  variants: [],
 };
 
 const initialState: ProductFormState = {};
@@ -205,6 +210,23 @@ export function ProductForm({
         🆕 Mark as New — features this product in the Update Email&apos;s
         &quot;New Products&quot; section
       </label>
+
+      <Field
+        label="Variants"
+        htmlFor="variantGroupName"
+        hint='Optional. Customers pick one as pills (e.g. "Design: Cat / Bear / Rabbit"), not a dropdown.'
+      >
+        <ProductVariantManager
+          initialGroupName={defaults.variantGroupName}
+          initialVariants={defaults.variants.map((v) => ({
+            id: v.id,
+            name: v.name,
+            sku: v.sku,
+            priceDollars: centsToDollars(v.priceCents),
+            imageUrl: v.imageUrl,
+          }))}
+        />
+      </Field>
 
       <Button type="submit" disabled={pending} className="self-start">
         {pending ? "Saving…" : submitLabel}

@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/Button";
 import { PreOrderFormFields } from "@/components/catalog/PreOrderFormFields";
 import { formatPrice } from "@/lib/validations/product";
 import { submitPreOrder, type OrderSubmitState } from "@/app/order/actions";
-import { useCart } from "@/components/cart/CartContext";
+import { useCart, parseCartKey } from "@/components/cart/CartContext";
 import { useWishlist } from "@/components/wishlist/WishlistContext";
-import type { CatalogProduct } from "@/components/catalog/types";
+import type { CatalogProduct, CatalogVariant } from "@/components/catalog/types";
 
 const initialState: OrderSubmitState = {};
 
@@ -29,18 +29,30 @@ export function CheckoutForm({
   const lines = useMemo(
     () =>
       Object.entries(cart.quantities)
-        .map(([productId, quantity]) => {
+        .map(([cartKey, quantity]) => {
+          const { productId, variantId } = parseCartKey(cartKey);
           const product = products.find((p) => p.id === productId);
-          return product ? { product, quantity } : null;
+          if (!product) return null;
+          const variant = variantId
+            ? (product.variants.find((v) => v.id === variantId) ?? null)
+            : null;
+          return { product, variant, quantity };
         })
-        .filter((line): line is { product: CatalogProduct; quantity: number } => line !== null),
+        .filter(
+          (line): line is { product: CatalogProduct; variant: CatalogVariant | null; quantity: number } =>
+            line !== null,
+        ),
     [cart.quantities, products],
   );
 
   const cartJson = useMemo(
     () =>
       JSON.stringify(
-        lines.map(({ product, quantity }) => ({ productId: product.id, quantity })),
+        lines.map(({ product, variant, quantity }) => ({
+          productId: product.id,
+          variantId: variant?.id ?? null,
+          quantity,
+        })),
       ),
     [lines],
   );
@@ -51,12 +63,13 @@ export function CheckoutForm({
   // currently wishlisted either way.
   const wishlistJson = useMemo(() => JSON.stringify(wishlist.ids), [wishlist.ids]);
 
-  const totalCents = lines.reduce(
-    (sum, { product, quantity }) =>
-      product.priceCents !== null ? sum + product.priceCents * quantity : sum,
-    0,
+  const totalCents = lines.reduce((sum, { product, variant, quantity }) => {
+    const priceCents = variant?.priceCents ?? product.priceCents;
+    return priceCents !== null ? sum + priceCents * quantity : sum;
+  }, 0);
+  const hasUnknownPrice = lines.some(
+    ({ product, variant }) => (variant?.priceCents ?? product.priceCents) === null,
   );
-  const hasUnknownPrice = lines.some(({ product }) => product.priceCents === null);
 
   if (lines.length === 0) {
     return (
@@ -78,35 +91,43 @@ export function CheckoutForm({
       <div className="rounded-card bg-white p-5 shadow-sm shadow-ink/5 sm:p-8">
         <h2 className="mb-4 font-display text-xl font-bold">Your items</h2>
         <ul className="flex flex-col divide-y divide-line">
-          {lines.map(({ product, quantity }) => (
-            <li key={product.id} className="flex items-center gap-4 py-3">
-              <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-mint/30">
-                {product.images[0]?.url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={product.images[0].url}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-2xl">
-                    🎀
-                  </div>
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold">{product.name}</p>
-                <p className="text-sm text-ink-soft">
-                  {product.brand} · × {quantity}
+          {lines.map(({ product, variant, quantity }) => {
+            const imageUrl = variant?.imageUrl ?? product.images[0]?.url;
+            const priceCents = variant?.priceCents ?? product.priceCents;
+            return (
+              <li
+                key={variant ? `${product.id}::${variant.id}` : product.id}
+                className="flex items-center gap-4 py-3"
+              >
+                <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-mint/30">
+                  {imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-2xl">
+                      🎀
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold">{product.name}</p>
+                  {variant && (
+                    <p className="text-sm text-ink-soft">
+                      {product.variantGroupName}: {variant.name}
+                    </p>
+                  )}
+                  <p className="text-sm text-ink-soft">
+                    {product.brand} · × {quantity}
+                  </p>
+                </div>
+                <p className="shrink-0 font-display font-bold">
+                  {priceCents !== null
+                    ? formatPrice(priceCents * quantity, product.currency)
+                    : "Price Coming Soon"}
                 </p>
-              </div>
-              <p className="shrink-0 font-display font-bold">
-                {product.priceCents !== null
-                  ? formatPrice(product.priceCents * quantity, product.currency)
-                  : "Price Coming Soon"}
-              </p>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
         <div className="mt-3 flex justify-between border-t border-line pt-3 font-display font-bold">
           <span>Total</span>

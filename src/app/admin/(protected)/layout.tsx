@@ -12,7 +12,7 @@ export default async function AdminLayout({
 
   return (
     <div className="min-h-screen bg-cream">
-      <header className="sticky top-0 z-10 border-b border-line bg-white/90 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b border-line bg-white/90 backdrop-blur print:hidden">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <SiteLogo logoUrl={settings?.logoUrl ?? null} size="compact" href="/admin" />
           <nav className="flex flex-wrap items-center gap-1 text-sm font-semibold">
@@ -45,6 +45,18 @@ export default async function AdminLayout({
               className="rounded-pill px-3 py-1.5 hover:bg-mint/50"
             >
               Pre-orders
+            </Link>
+            <Link
+              href="/admin/purchases"
+              className="rounded-pill px-3 py-1.5 hover:bg-mint/50"
+            >
+              Purchases
+            </Link>
+            <Link
+              href="/admin/analytics"
+              className="rounded-pill px-3 py-1.5 hover:bg-mint/50"
+            >
+              Analytics
             </Link>
             <Link
               href="/admin/settings"

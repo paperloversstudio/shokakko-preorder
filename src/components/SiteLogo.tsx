@@ -10,8 +10,9 @@ import { Logo } from "@/components/Logo";
 //   - "compact": a modest size for the admin header, where a giant logo
 //     would crowd the nav.
 const IMAGE_SIZE_CLASSES = {
-  homepage:
-    "h-28 w-auto max-w-[320px] object-contain sm:h-32 sm:max-w-[400px] lg:h-40 lg:max-w-[520px]",
+  // Sized to match a typical Shopify-style header logo (per your reference
+  // screenshot of shokakko.com.au) — was up to 160px tall, now caps at 56px.
+  homepage: "h-10 w-auto max-w-[160px] object-contain sm:h-12 sm:max-w-[200px] lg:h-14 lg:max-w-[240px]",
   checkout: "h-36 w-auto object-contain",
   compact: "h-10 w-auto max-w-[140px] object-contain",
 } as const;
@@ -19,7 +20,7 @@ const IMAGE_SIZE_CLASSES = {
 // Text-logo fallback (no image uploaded yet) sized to roughly track its
 // image counterpart above.
 const FALLBACK_TEXT_CLASSES = {
-  homepage: "text-4xl sm:text-5xl lg:text-6xl",
+  homepage: "text-2xl sm:text-3xl lg:text-4xl",
   checkout: "text-4xl",
   compact: "text-lg",
 } as const;

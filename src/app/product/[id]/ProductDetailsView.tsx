@@ -4,8 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { QuantitySelector } from "@/components/catalog/QuantitySelector";
+import { VariantPills } from "@/components/catalog/VariantPills";
 import { formatPrice } from "@/lib/validations/product";
-import { useCart } from "@/components/cart/CartContext";
+import { useCart, buildCartKey } from "@/components/cart/CartContext";
 import { useWishlist } from "@/components/wishlist/WishlistContext";
 import type { CatalogProduct } from "@/components/catalog/types";
 
@@ -13,13 +14,38 @@ export function ProductDetailsView({ product }: { product: CatalogProduct }) {
   const cart = useCart();
   const wishlist = useWishlist();
   const [activeImage, setActiveImage] = useState(0);
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
+    product.variants[0]?.id ?? null,
+  );
+  // The selected variant's own photo (if it has one) takes over the main
+  // image; picking a thumbnail directly clears this override until the
+  // variant selection changes again.
+  const [variantImageOverride, setVariantImageOverride] = useState<string | null>(
+    product.variants[0]?.imageUrl ?? null,
+  );
 
-  const quantity = cart.quantities[product.id] ?? 0;
+  const selectedVariant =
+    product.variants.find((v) => v.id === selectedVariantId) ?? null;
+  const cartKey = buildCartKey(product.id, selectedVariant?.id);
+  const quantity = cart.quantities[cartKey] ?? 0;
   const isSoldOut = product.status === "sold_out";
-  const isWishlisted = wishlist.has(product.id);
+  const isWishlisted = wishlist.has(product.id, selectedVariant?.id);
   const images = product.images;
   const mainImage =
-    images.length > 0 ? images[Math.min(activeImage, images.length - 1)].url : null;
+    variantImageOverride ??
+    (images.length > 0 ? images[Math.min(activeImage, images.length - 1)].url : null);
+  const priceCents = selectedVariant?.priceCents ?? product.priceCents;
+
+  function selectVariant(variantId: string) {
+    setSelectedVariantId(variantId);
+    const variant = product.variants.find((v) => v.id === variantId);
+    setVariantImageOverride(variant?.imageUrl ?? null);
+  }
+
+  function selectThumbnail(index: number) {
+    setActiveImage(index);
+    setVariantImageOverride(null);
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6">
@@ -53,10 +79,12 @@ export function ProductDetailsView({ product }: { product: CatalogProduct }) {
                 <button
                   key={img.url}
                   type="button"
-                  onClick={() => setActiveImage(index)}
+                  onClick={() => selectThumbnail(index)}
                   aria-label={`Show photo ${index + 1}`}
                   className={`h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 transition ${
-                    index === activeImage ? "border-blue" : "border-transparent"
+                    !variantImageOverride && index === activeImage
+                      ? "border-blue"
+                      : "border-transparent"
                   }`}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -76,7 +104,7 @@ export function ProductDetailsView({ product }: { product: CatalogProduct }) {
             <h1 className="font-display text-2xl font-bold leading-snug">
               {product.name}
             </h1>
-            <p className="text-xs text-ink-soft">SKU {product.sku}</p>
+            <p className="text-xs text-ink-soft">SKU {selectedVariant?.sku || product.sku}</p>
           </div>
 
           {isSoldOut && <Badge tone="coral">Sold Out</Badge>}
@@ -97,18 +125,27 @@ export function ProductDetailsView({ product }: { product: CatalogProduct }) {
             </p>
           )}
 
+          {product.variantGroupName && product.variants.length > 0 && (
+            <VariantPills
+              groupName={product.variantGroupName}
+              variants={product.variants}
+              selectedId={selectedVariantId ?? ""}
+              onSelect={selectVariant}
+            />
+          )}
+
           <p className="font-display text-2xl font-extrabold text-ink">
-            {product.priceCents === null ? (
+            {priceCents === null ? (
               <span className="text-coral">Price Coming Soon</span>
             ) : (
-              formatPrice(product.priceCents, product.currency)
+              formatPrice(priceCents, product.currency)
             )}
           </p>
 
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={() => wishlist.toggle(product.id)}
+              onClick={() => wishlist.toggle(product.id, selectedVariant?.id)}
               aria-pressed={isWishlisted}
               className="flex items-center gap-2 rounded-pill border border-line bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-mint/30"
             >
@@ -120,7 +157,7 @@ export function ProductDetailsView({ product }: { product: CatalogProduct }) {
               (quantity === 0 ? (
                 <button
                   type="button"
-                  onClick={() => cart.addItem(product.id)}
+                  onClick={() => cart.addItem(product.id, selectedVariant?.id)}
                   className="flex min-h-[50px] items-center gap-2 rounded-pill bg-blue px-4 py-2.5 text-sm font-display font-semibold text-white shadow-sm shadow-blue/30 transition hover:brightness-105 active:brightness-95"
                 >
                   Add to Pre-order
@@ -128,7 +165,7 @@ export function ProductDetailsView({ product }: { product: CatalogProduct }) {
               ) : (
                 <QuantitySelector
                   value={quantity}
-                  onChange={(qty) => cart.setQuantity(product.id, qty)}
+                  onChange={(qty) => cart.setQuantity(cartKey, qty)}
                 />
               ))}
           </div>

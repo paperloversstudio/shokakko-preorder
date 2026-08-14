@@ -11,8 +11,8 @@ import {
 
 type CartContextValue = {
   quantities: Record<string, number>;
-  setQuantity: (productId: string, quantity: number) => void;
-  addItem: (productId: string) => void;
+  setQuantity: (cartKey: string, quantity: number) => void;
+  addItem: (productId: string, variantId?: string | null) => void;
   itemCount: number;
   isDrawerOpen: boolean;
   openDrawer: () => void;
@@ -23,6 +23,21 @@ type CartContextValue = {
 const CartContext = createContext<CartContextValue | null>(null);
 const STORAGE_KEY = "shokakko_cart";
 const MAX_QTY = 10;
+
+/** Sprint 3.5 — a cart line's key is the bare productId for a plain
+ * product (unchanged from before variants existed), or
+ * `${productId}::${variantId}` once a variant is chosen — two different
+ * variants of the same product are genuinely separate lines, so they
+ * need separate keys/quantities. */
+export function buildCartKey(productId: string, variantId?: string | null): string {
+  return variantId ? `${productId}::${variantId}` : productId;
+}
+
+export function parseCartKey(key: string): { productId: string; variantId: string | null } {
+  const separator = key.indexOf("::");
+  if (separator === -1) return { productId: key, variantId: null };
+  return { productId: key.slice(0, separator), variantId: key.slice(separator + 2) };
+}
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -53,25 +68,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, [quantities, hydrated]);
 
-  const setQuantity = useCallback((productId: string, quantity: number) => {
+  const setQuantity = useCallback((cartKey: string, quantity: number) => {
     setQuantities((prev) => {
-      const wasEmpty = !prev[productId];
+      const wasEmpty = !prev[cartKey];
       if (quantity <= 0) {
-        if (!(productId in prev)) return prev;
+        if (!(cartKey in prev)) return prev;
         const next = { ...prev };
-        delete next[productId];
+        delete next[cartKey];
         return next;
       }
       if (wasEmpty) setDrawerOpen(true); // auto-open on 0 -> N
-      return { ...prev, [productId]: Math.min(MAX_QTY, quantity) };
+      return { ...prev, [cartKey]: Math.min(MAX_QTY, quantity) };
     });
   }, []);
 
-  const addItem = useCallback((productId: string) => {
+  const addItem = useCallback((productId: string, variantId?: string | null) => {
+    const cartKey = buildCartKey(productId, variantId);
     setQuantities((prev) => {
-      const current = prev[productId] ?? 0;
+      const current = prev[cartKey] ?? 0;
       if (current === 0) setDrawerOpen(true);
-      return { ...prev, [productId]: Math.min(MAX_QTY, current + 1) };
+      return { ...prev, [cartKey]: Math.min(MAX_QTY, current + 1) };
     });
   }, []);
 

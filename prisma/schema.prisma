@@ -42,15 +42,55 @@ model Product {
   // Null = no baseline yet (pre-Sprint-3 products), so nothing is ever
   // flagged as "changed" until a first baseline exists.
   lastNotifiedPriceCents Int?
+  // Sprint 3.5 — one optional variant group per product (e.g. "Design",
+  // "Colour", "Size"). Null = this product has no variants; free text,
+  // same pattern as `type`/`brand`, no fixed list. When set, `variants`
+  // holds the actual pill options (Cat/Bear/Rabbit, ...).
+  variantGroupName       String?
+  // Sprint 3.5 — Purchase Dashboard checklist status for this product,
+  // used only when the product has NO variants (a variant-having product
+  // is tracked per-variant instead, see ProductVariant.purchaseStatus
+  // below). "not_purchased" | "partially_purchased" | "purchased".
+  purchaseStatus         String   @default("not_purchased")
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
   images               ProductImage[]
   tags                 Tag[]
+  variants             ProductVariant[]
   orderItems           OrderItem[]
   wishlistItems        WishlistItem[]
   digestItems          EmailDigestItem[]
   recommendedInDigests EmailDigest[]     @relation("DigestRecommended")
+}
+
+// Sprint 3.5 — one row per pill option under a product's single variant
+// group (Product.variantGroupName). Deliberately flat (one group per
+// product), not a separate VariantGroup model — matches the brief's
+// "Current requirement: Support ONE Variant Group per product."
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // "Cat", "Bear", "Rabbit", ...
+  name      String
+  // Optional; unique when set — nullable-unique is fine on SQLite (every
+  // NULL is treated as distinct), same precedent as PreOrder.editToken.
+  sku       String? @unique
+  // Null = use the parent Product's own priceCents.
+  priceCentsOverride Int?
+  // One image per variant (no gallery) — swaps in as the main product
+  // photo on selection; falls back to the product's own gallery when null.
+  imageUrl  String?
+  // Admin-controlled pill display order.
+  sortOrder Int     @default(0)
+  // Purchase Dashboard checklist status for this specific variant — see
+  // Product.purchaseStatus above for the no-variant equivalent.
+  purchaseStatus String @default("not_purchased")
+  createdAt DateTime @default(now())
+
+  orderItems    OrderItem[]
+  wishlistItems WishlistItem[]
 }
 
 model ProductImage {
@@ -199,9 +239,20 @@ model WishlistItem {
   preOrder   PreOrder @relation(fields: [preOrderId], references: [id], onDelete: Cascade)
   productId  String
   product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Sprint 3.5 — which variant was wishlisted, if the product has any.
+  // Still a live reference (not a snapshot, same reasoning as productId
+  // above) — SetNull, not Cascade, so deleting just the variant leaves
+  // the wishlist item pointing at the base product rather than vanishing.
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
   addedAt    DateTime @default(now())
 
-  @@unique([preOrderId, productId])
+  // Includes variantId so two different variants of the same product can
+  // both be wishlisted at once (each is its own row) — the toggle Server
+  // Action does its own findFirst lookup scoped to the exact variant
+  // (or explicitly variantId: null) rather than relying solely on this
+  // constraint, since SQLite treats every NULL as distinct under UNIQUE.
+  @@unique([preOrderId, productId, variantId])
 }
 
 model OrderItem {
@@ -213,6 +264,10 @@ model OrderItem {
   // below are the permanent record of what was actually ordered.
   productId  String?
   product    Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  // Sprint 3.5 — which variant was ordered, if the product has any.
+  // Nullable + SetNull, same reasoning as productId above.
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
   quantity   Int
 
   // Snapshot of product details at order time, so the order stays accurate
@@ -220,6 +275,10 @@ model OrderItem {
   productName    String
   productBrand   String
   productSku     String
+  // Sprint 3.5 — snapshot of the chosen variant's name (e.g. "Bear"), so
+  // "Notebook / Design: Bear" still displays correctly even if the
+  // variant is later renamed or deleted. Null when no variant was chosen.
+  variantName    String?
   unitPriceCents Int?
 }
 
@@ -279,4 +338,24 @@ model EmailDigestItem {
   productName        String
   priceCents         Int?
   previousPriceCents Int? // only set for kind = "price_update"
+}
+
+// --- Purchase & Analytics Dashboards (Sprint 3.5) ---
+//
+// Small, generic activity feed for the Analytics Dashboard's "Recent
+// Activity" section — not a full audit log (no before/after diffing, no
+// actor tracking, since there's only ever one admin). Deliberately just
+// four insert points feed this: product create, a price actually
+// changing on update, a pre-order submission, and a wishlist add — see
+// docs/PRD.md for the full write-site list. `productId` is intentionally
+// not a required relation (kept a plain nullable string, no FK/cascade)
+// so a deleted product never needs its history rewritten or removed.
+model ActivityLog {
+  id        String   @id @default(cuid())
+  // "product_added" | "price_updated" | "order_submitted" | "wishlist_added"
+  type      String
+  // Short, human-readable line, e.g. "Midori Notebook price changed to $12.50".
+  message   String
+  productId String?
+  createdAt DateTime @default(now())
 }

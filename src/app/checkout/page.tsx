@@ -13,7 +13,11 @@ export default async function CheckoutPage() {
   const [products, settings] = await Promise.all([
     db.product.findMany({
       where: { status: { in: ["active", "sold_out"] } },
-      include: { tags: true, images: { orderBy: { sortOrder: "asc" } } },
+      include: {
+        tags: true,
+        images: { orderBy: { sortOrder: "asc" } },
+        variants: { orderBy: { sortOrder: "asc" } },
+      },
     }),
     db.siteSettings.findUnique({ where: { id: "singleton" } }),
   ]);

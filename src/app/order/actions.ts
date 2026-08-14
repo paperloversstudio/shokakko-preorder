@@ -14,7 +14,8 @@ export type OrderSubmitState = {
   fieldErrors?: Record<string, string>;
 };
 
-type CartLine = { productId: string; quantity: number };
+// Sprint 3.5 — variantId is optional (null/absent for a plain product).
+type CartLine = { productId: string; variantId: string | null; quantity: number };
 
 function parseCart(raw: string | undefined | null): CartLine[] {
   if (!raw) return [];
@@ -28,21 +29,27 @@ function parseCart(raw: string | undefined | null): CartLine[] {
 
   return parsed
     .filter(
-      (line): line is { productId: unknown; quantity: unknown } =>
+      (line): line is { productId: unknown; variantId: unknown; quantity: unknown } =>
         typeof line === "object" && line !== null,
     )
     .filter(
-      (line): line is CartLine =>
+      (line): line is { productId: string; variantId: unknown; quantity: number } =>
         typeof line.productId === "string" && typeof line.quantity === "number",
     )
     .map((line) => ({
       productId: line.productId,
+      variantId: typeof line.variantId === "string" ? line.variantId : null,
       quantity: Math.max(0, Math.min(10, Math.floor(line.quantity))),
     }))
     .filter((line) => line.quantity > 0);
 }
 
-function parseWishlistIds(raw: string | undefined | null): string[] {
+// Sprint 3.5 — each raw id is either a bare productId (no variant) or
+// `${productId}::${variantId}` — same composite-key convention as
+// CartContext/WishlistContext.
+function parseWishlistIds(
+  raw: string | undefined | null,
+): { productId: string; variantId: string | null }[] {
   if (!raw) return [];
   let parsed: unknown;
   try {
@@ -51,7 +58,13 @@ function parseWishlistIds(raw: string | undefined | null): string[] {
     return [];
   }
   if (!Array.isArray(parsed)) return [];
-  return Array.from(new Set(parsed.filter((id): id is string => typeof id === "string")));
+  const ids = Array.from(new Set(parsed.filter((id): id is string => typeof id === "string")));
+  return ids.map((id) => {
+    const separator = id.indexOf("::");
+    return separator === -1
+      ? { productId: id, variantId: null }
+      : { productId: id.slice(0, separator), variantId: id.slice(separator + 2) };
+  });
 }
 
 export async function submitPreOrder(
@@ -115,6 +128,7 @@ export async function submitPreOrder(
   const productIds = cart.map((line) => line.productId);
   const products = await db.product.findMany({
     where: { id: { in: productIds }, status: "active" },
+    include: { variants: true },
   });
   const productMap = new Map(products.map((p) => [p.id, p]));
 
@@ -122,13 +136,21 @@ export async function submitPreOrder(
     .map((line) => {
       const product = productMap.get(line.productId);
       if (!product) return null;
+      // Never trust the client's product/variant pairing — the variant
+      // must actually belong to this product, or it's treated as "no
+      // variant chosen" rather than silently trusting a mismatched id.
+      const variant = line.variantId
+        ? product.variants.find((v) => v.id === line.variantId)
+        : undefined;
       return {
         productId: product.id,
+        variantId: variant?.id ?? null,
         quantity: line.quantity,
         productName: product.name,
         productBrand: product.brand,
         productSku: product.sku,
-        unitPriceCents: product.priceCents,
+        variantName: variant?.name ?? null,
+        unitPriceCents: variant?.priceCentsOverride ?? product.priceCents,
       };
     })
     .filter((line): line is NonNullable<typeof line> => line !== null);
@@ -147,14 +169,24 @@ export async function submitPreOrder(
   // validated against real products, same never-trust-the-client pattern
   // as the cart above. Wishlisted sold-out items are fine to keep; only a
   // genuinely nonexistent ID (stale/tampered client) gets dropped.
-  const wishlistIds = parseWishlistIds(formData.get("wishlistJson")?.toString());
-  let wishlistCreate: { productId: string }[] = [];
-  if (wishlistIds.length > 0) {
+  const wishlistEntries = parseWishlistIds(formData.get("wishlistJson")?.toString());
+  let wishlistCreate: { productId: string; variantId: string | null }[] = [];
+  if (wishlistEntries.length > 0) {
     const wishlistProducts = await db.product.findMany({
-      where: { id: { in: wishlistIds } },
-      select: { id: true },
+      where: { id: { in: wishlistEntries.map((e) => e.productId) } },
+      include: { variants: true },
     });
-    wishlistCreate = wishlistProducts.map((p) => ({ productId: p.id }));
+    const wishlistProductMap = new Map(wishlistProducts.map((p) => [p.id, p]));
+    wishlistCreate = wishlistEntries
+      .map((entry) => {
+        const product = wishlistProductMap.get(entry.productId);
+        if (!product) return null;
+        const variant = entry.variantId
+          ? product.variants.find((v) => v.id === entry.variantId)
+          : undefined;
+        return { productId: product.id, variantId: variant?.id ?? null };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
   }
 
   const order = await db.preOrder.create({
@@ -182,6 +214,18 @@ export async function submitPreOrder(
       wishlistItems: { create: wishlistCreate },
     },
   });
+
+  // Best-effort Recent Activity entry (Sprint 3.5 Analytics Dashboard) —
+  // never blocks a successful submission.
+  const itemCount = lineItems.reduce((sum, item) => sum + item.quantity, 0);
+  await db.activityLog
+    .create({
+      data: {
+        type: "order_submitted",
+        message: `Order ${orderNumber} submitted — ${itemCount} item${itemCount === 1 ? "" : "s"}`,
+      },
+    })
+    .catch(() => {});
 
   // Links this browser to the order's wishlist going forward — the root
   // layout reads this on every request from here on (see src/app/layout.tsx

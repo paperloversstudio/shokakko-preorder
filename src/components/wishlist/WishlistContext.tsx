@@ -11,8 +11,13 @@ import {
 import { toggleWishlistItem } from "./actions";
 
 type WishlistContextValue = {
-  has: (productId: string) => boolean;
-  toggle: (productId: string) => void;
+  /** Called with no variant id (every pre-Sprint-3.5 caller), this means
+   * "is any variant of this product, or the plain product itself,
+   * wishlisted" — exactly what the card's heart icon and the "♡
+   * Wishlist" grid filter need, so neither had to change. Pass a
+   * variant id (only the Product Details page does) for an exact match. */
+  has: (productId: string, variantId?: string | null) => boolean;
+  toggle: (productId: string, variantId?: string | null) => void;
   ids: string[];
   count: number;
   isDrawerOpen: boolean;
@@ -22,6 +27,14 @@ type WishlistContextValue = {
 
 const WishlistContext = createContext<WishlistContextValue | null>(null);
 const STORAGE_KEY = "shokakko_wishlist";
+
+/** Sprint 3.5 — same composite-key convention as the cart
+ * (`${productId}::${variantId}`, or the bare productId when there's no
+ * variant) so two different variants of the same product can both be
+ * wishlisted at once. */
+function buildWishlistKey(productId: string, variantId?: string | null): string {
+  return variantId ? `${productId}::${variantId}` : productId;
+}
 
 /**
  * Two modes, decided once per request by the root layout (server-side,
@@ -81,17 +94,18 @@ export function WishlistProvider({
   }, [ids, hydrated, linked]);
 
   const toggle = useCallback(
-    (productId: string) => {
+    (productId: string, variantId?: string | null) => {
+      const key = buildWishlistKey(productId, variantId);
       const previousIds = ids;
-      const nextIds = previousIds.includes(productId)
-        ? previousIds.filter((id) => id !== productId)
-        : [...previousIds, productId];
+      const nextIds = previousIds.includes(key)
+        ? previousIds.filter((id) => id !== key)
+        : [...previousIds, key];
 
       // Optimistic either way — instant UI regardless of mode.
       setIds(nextIds);
 
       if (linked && linkedToken) {
-        toggleWishlistItem(linkedToken, productId).catch(() => {
+        toggleWishlistItem(linkedToken, productId, variantId ?? null).catch(() => {
           // Roll back to exactly what it was before this optimistic
           // update — rare (network blip), but otherwise the UI would
           // silently drift from what's actually saved.
@@ -102,7 +116,17 @@ export function WishlistProvider({
     [ids, linked, linkedToken],
   );
 
-  const has = useCallback((productId: string) => ids.includes(productId), [ids]);
+  const has = useCallback(
+    (productId: string, variantId?: string | null) => {
+      if (variantId !== undefined && variantId !== null) {
+        return ids.includes(buildWishlistKey(productId, variantId));
+      }
+      // No variant specified — "is anything for this product wishlisted"
+      // (the plain product itself, or any of its variants).
+      return ids.some((id) => id === productId || id.startsWith(`${productId}::`));
+    },
+    [ids],
+  );
 
   const value = useMemo<WishlistContextValue>(
     () => ({

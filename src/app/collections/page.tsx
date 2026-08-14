@@ -25,7 +25,11 @@ export default async function CollectionsIndexPage() {
     // customer opens them from.
     db.product.findMany({
       where: { status: { in: ["active", "sold_out"] } },
-      include: { tags: true, images: { orderBy: { sortOrder: "asc" } } },
+      include: {
+        tags: true,
+        images: { orderBy: { sortOrder: "asc" } },
+        variants: { orderBy: { sortOrder: "asc" } },
+      },
     }),
   ]);
   const catalog = products.map(toCatalogProduct);

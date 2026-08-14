@@ -2,6 +2,91 @@
 
 Notable changes to the Shokakko Australia pre-order site, newest first.
 
+## Post-Sprint-3.5 fix (2026-08-14)
+
+### Fixed
+
+- **Homepage header logo was oversized** — up to 160px tall (`h-40` at the
+  `lg` breakpoint), a leftover from two separate "double the size" passes
+  compounding on top of each other. Reduced to a typical header size (40px
+  mobile up to 56px desktop), matching the reference size shown on the
+  live shokakko.com.au Shopify store. Scoped to `SiteLogo`'s `homepage`
+  preset only (also used on My Pre-order and the order confirmation page)
+  — the `checkout` preset (4x, used only on `/checkout`) was left as-is,
+  since only the homepage-style logo was reported as too large.
+
+## Sprint 3.5 — Product Variants, Purchase Dashboard & Analytics Dashboard (2026-08-14)
+
+Improves product management for large event catalogues (100–200 products)
+and adds two new admin dashboards for purchasing efficiently and reading
+customer interest during a live exhibition. **This sprint deliberately did
+not modify the existing customer preorder/checkout workflow** — variant
+selection happens entirely on the Product Details page, before anything
+reaches the cart.
+
+### Added
+
+- **Product Variants** — one optional variant group per product (e.g.
+  "Design" → Cat/Bear/Rabbit), each variant with its own optional SKU,
+  price override, and image. Admin: a new variant-rows editor on the
+  product form, mirroring the existing photo manager's add/remove/drag-
+  reorder pattern. Customer: variants render as selectable **pills** (not
+  a dropdown) on the Product Details page — selecting one instantly swaps
+  the main image/price with no page reload. Cart, wishlist, checkout, and
+  both the admin order detail and customer order confirmation pages are
+  all variant-aware, showing a "{Variant group}: {Variant name}" line
+  wherever an item is listed.
+- **`prisma/schema.prisma`**: new `ProductVariant` model;
+  `Product.variantGroupName`/`purchaseStatus`; `WishlistItem.variantId`
+  (unique constraint extended to include it); `OrderItem.variantId`/
+  `variantName`; new `ActivityLog` model. One additive migration, applied
+  cleanly with no data loss.
+- **Admin Purchase Dashboard** (`/admin/purchases`) — mobile-first (built
+  for Karen's iPhone first, full desktop support too). Summary tiles
+  (Total Products, Products Without Price, Draft/Sold Out Products, Total
+  Wishlist Items, Total Pre-orders, Average Order Size), a Purchase
+  Progress bar, and a Buying List scoped to every product/variant that
+  appears in at least one submitted pre-order — with Brand/Collection/
+  Product Type/Product Status/Purchased Status filters, sort by Quantity/
+  Brand/Collection/Name, a Not Purchased/Partially Purchased/Purchased
+  status per row that persists to the database, CSV export, and a
+  print-friendly view.
+- **Admin Analytics Dashboard** (`/admin/analytics`) — Most Wishlisted
+  Products/Brands/Collections, Most Added To Pre-order, Most Popular
+  Brands/Collections, Products Waiting For Price, High Interest Products
+  (wishlisted but rarely ordered), and a Recent Activity feed.
+- **`ActivityLog`** table — a small, generic event feed (not a full audit
+  log) fed by four write points: a product being added, a product's price
+  actually changing, a pre-order being submitted, and a wishlist item
+  being added from an already-linked browser. Powers the Analytics
+  Dashboard's Recent Activity section.
+- Admin nav gained **Purchases** and **Analytics** links.
+
+### Changed
+
+- **Homepage product cards simplified**: SKU and Estimated Arrival no
+  longer render on the grid card (still shown on the Product Details
+  page). A product with a variant group shows a **"View Options"** button
+  in place of the one-click wishlist heart/quantity stepper, since which
+  variant is wanted has to be chosen on the Details page first.
+- **Cart and wishlist are now variant-aware end to end**: both contexts
+  key their state by a composite `productId::variantId` string when a
+  variant is involved (a plain product's key is unchanged, so every
+  pre-existing call site needed zero changes) — two different variants of
+  the same product are two independent cart lines / wishlist entries.
+
+### Fixed
+
+- **New variant rows silently failed to save** — `variantFormSchema`'s
+  `id` field was `z.string().trim().optional()`, which only accepts
+  `undefined`; the admin form always sends `id: null` (not `undefined`)
+  for a brand-new row, so every new row failed validation and was quietly
+  dropped from `variantsJson` before it ever reached the database (the
+  parent product and its `variantGroupName` still saved correctly, making
+  this easy to miss without directly re-querying the database). Caught
+  during this sprint's own verification pass, before shipping. Fixed by
+  changing the schema to `.nullable().optional()`.
+
 ## Checkout & Logo Polish (2026-08-14)
 
 Post-staging-review fixes: structured checkout fields, shipping method,

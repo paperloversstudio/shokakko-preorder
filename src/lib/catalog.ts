@@ -13,6 +13,14 @@ type ProductWithRelations = {
   status: string;
   images: { url: string }[];
   tags: { name: string }[];
+  variantGroupName: string | null;
+  variants: {
+    id: string;
+    name: string;
+    sku: string | null;
+    priceCentsOverride: number | null;
+    imageUrl: string | null;
+  }[];
 };
 
 /** Shared by every customer-facing page (`/`, `/checkout`) that needs the
@@ -32,5 +40,13 @@ export function toCatalogProduct(product: ProductWithRelations): CatalogProduct 
     type: product.type,
     status: product.status as "active" | "sold_out",
     tags: product.tags.map((tag) => tag.name),
+    variantGroupName: product.variantGroupName,
+    variants: product.variants.map((v) => ({
+      id: v.id,
+      name: v.name,
+      sku: v.sku,
+      priceCents: v.priceCentsOverride,
+      imageUrl: v.imageUrl,
+    })),
   };
 }
