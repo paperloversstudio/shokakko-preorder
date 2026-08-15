@@ -27,6 +27,16 @@ fields restructured from one free-text field into Address 1/2, Suburb,
 State, Postcode, Country, a Standard/Express `shippingMethod` selector, a
 bolded shipping notice, and the shared `SiteLogo` component (2x size on the
 homepage header, 4x on checkout) — see §2.1/§2.2/§4.7 below.
+**7.0** (Sprint 4 — Event Pages CMS): transforms the site into a small
+Event Platform. A block-based CMS (§2.20) lets Karen write and update her
+own site content — How to Pre-order, About the Event, and any future page
+(FAQ, Privacy Policy, Wholesale Information, ...) — with no code changes.
+Five section types (Text, Image, Gallery, Button, Divider), a Page
+Builder with drag-reorder/duplicate/delete/collapse, a single `/[slug]`
+catch-all route that serves any admin-created page automatically, two
+new homepage nav pills, and two new footer links. **This sprint does not
+modify any existing pre-order/checkout/product/variant/purchase/
+analytics functionality** — every touch to existing files is additive.
 **Scope of this document:** Every claim below is derived from reading the
 actual source code, database schema, and migrations in this repository.
 Nothing here describes a feature that is not already implemented. Where
@@ -97,6 +107,10 @@ Composed in `src/app/page.tsx` (Server Component, `force-dynamic` — see
   (`max-width: 1279px` → tablet image, `max-width: 767px` → mobile image),
   with headline/description text and an optional button overlaid on a
   gradient. Renders nothing if there are zero active banners.
+- **Event Pages nav pills** (`EventPageNavPills`, new in Sprint 4): two
+  outline-pill links, "How to Pre-order" and "About the Event," directly
+  under the hero carousel and above the event info strip — see §2.20.7.
+  Deliberately its own row, not merged into the filters below.
 - **Event info strip** (`EventInfoStrip`): a thin bar below the hero showing
   `SiteSettings.eventName`/`eventLocation`/`eventInfo` (only the fields that
   are set) and, if `countdownTargetAt` is set, a live-updating "Pre-orders
@@ -427,12 +441,15 @@ confirmation, ✿ logo mark) — still no icon library.
 
 ### 2.13a Footer
 
-`src/components/layout/Footer.tsx` — two links, "Contact Us"
-(`https://www.shokakko.com.au/pages/contact-us`) and "Shipping Policy"
-(`https://www.shokakko.com.au/pages/shipping-policy`), both opening in a
-new tab. Rendered at the bottom of every customer-facing page: `/`,
-`/checkout`, `/product/[id]`, `/order/[orderNumber]`, `/my-preorders`. Not
-rendered on any `/admin/*` page.
+`src/components/layout/Footer.tsx` — **New in Sprint 4**: two internal
+links, "How to Pre-order" (`/how-to-preorder`) and "About the Event"
+(`/about-event`), added before the two pre-existing external links,
+"Contact Us" (`https://www.shokakko.com.au/pages/contact-us`) and
+"Shipping Policy" (`https://www.shokakko.com.au/pages/shipping-policy`,
+both still opening in a new tab). Rendered at the bottom of every
+customer-facing page: `/`, `/checkout`, `/product/[id]`,
+`/order/[orderNumber]`, `/my-preorders`, and — new in Sprint 4—
+`/[slug]` (§2.20.6). Not rendered on any `/admin/*` page.
 
 ### 2.14 Product Details page (`/product/[id]`, new)
 
@@ -815,6 +832,159 @@ and the dataset is boutique-event-sized, not web-scale.
   Deliberate scope boundary, not a bug: the approved plan named exactly
   `toggleWishlistItem`'s create branch as the trigger point.
 
+### 2.20 Event Pages CMS (Sprint 4)
+
+A lightweight, block-based content management system so Karen can write
+and update her own site content — no code changes, no developer needed.
+Turns the single-event pre-order site into a small Event Platform capable
+of hosting future events' informational pages (Taiwan Creative Expo,
+Bungujoshi Haku, Kamihaku, a future Wholesale Portal) as well as the two
+seeded pages this sprint ships with.
+
+#### 2.20.1 Data model — one open `type`, not one table per section
+
+`EventPage` (`slug`, `title`, `sortOrder`) has many `PageSection` rows
+(`type: String`, `data: Json`, `sortOrder`). Deliberately **one** table
+for every section type, not a table per type — a future section (Video,
+FAQ Accordion, Countdown Timer, Google Map, embedded Instagram/YouTube,
+Product Carousel — all explicitly named in the brief as future-only, none
+built this sprint) is just a new `type` string value plus a new Zod
+schema in `src/lib/validations/event-page.ts`, no migration required.
+Same reasoning already used for `ActivityLog.type` in Sprint 3.5 — see
+§4.1b/§4.1c.
+
+#### 2.20.2 Admin: Page List + Page Builder
+
+- **Page List** (`/admin/event-pages`) — before listing, upserts the two
+  seeded pages by slug if they don't already exist (same "lazy singleton"
+  pattern as `SiteSettings`, applied per-visit instead of once) — this is
+  what guarantees they exist on staging with no manual seed step, not
+  just locally. Shows every page's title, slug, section count, a View
+  Page link, Edit, and Delete (hidden for the two protected pages, see
+  below) plus **+ Add Page** (title + slug, slug auto-suggested from the
+  title via a client-side `slugify()` until the admin types into the slug
+  field directly).
+- **Page Builder** (`/admin/event-pages/[id]`) — a small title/slug edit
+  form at top (slug read-only with an explanation when the page is
+  protected), then the section list.
+- **Slug validation**: lowercase letters/digits/hyphens only, checked
+  against `RESERVED_SLUGS` (`admin`, `api`, `checkout`, `collections`,
+  `my-preorders`, `order`, `product`, `unsubscribe` — every existing
+  top-level route) so an admin can never accidentally create a page whose
+  URL is silently shadowed by a real feature (Next always resolves a
+  static route before the `/[slug]` catch-all at the same level regardless,
+  but a page that can never be reached is still a confusing dead end
+  worth blocking up front).
+- **`PROTECTED_SLUGS`** (`how-to-preorder`, `about-event`) — the two
+  seeded pages' slugs can't be changed and the pages can't be deleted,
+  server-enforced in `updateEventPage`/`deleteEventPage` (the admin UI
+  also hides the affected controls) — the homepage nav pills and the
+  footer link to these exact URLs, so this prevents an easy way to
+  silently break both.
+
+#### 2.20.3 Section management
+
+Each section is its own independently-savable block (a dedicated Server
+Action per type, not one form for the whole page — friendlier for a
+non-technical admin, since a mistake in one section's form can't block
+saving the others):
+
+- **+ Add Section** — a small type-picker menu (5 options with a
+  one-line description each); creates a row with sensible empty defaults
+  at the end of the list, appearing inline with no page navigation.
+- **Drag-and-drop reorder** — native HTML5 drag events on just the
+  section card's header row (not the whole card, including its expanded
+  editor — keeps native drag from ever interfering with text selection
+  inside an expanded Text section's rich text editor), same
+  `draggable`/`onDragStart`/`onDragOver`/`onDrop` idiom as
+  `BannerList.tsx`.
+- **Duplicate** — copies a section's `type` and `data` (including any
+  image URL(s) — no re-upload; the copy only diverges once one of the two
+  is independently edited) immediately after the original.
+- **Delete** — removes the row and best-effort deletes any stored
+  image(s) it referenced.
+- **Collapse/Expand** — per-card, local UI state only, not persisted.
+
+#### 2.20.4 The five section types
+
+- **Text** — an optional title plus a rich text editor
+  (`EventSectionRichTextEditor.tsx`) supporting headings (H2/H3),
+  paragraphs, bold, italic, bullet/numbered lists, hyperlinks, tables
+  (insert a 3×3 with header row, add row, add column, delete table — the
+  add/delete controls only show while the cursor is inside a table), a
+  horizontal rule, text colour (a curated swatch row: the brand palette
+  plus black/gray), text alignment (left/centre/right), and a curated
+  emoji-insert popover (no emoji-picker dependency — a handful of rows
+  covering brand marks + everyday reactions, inserted as plain Unicode
+  text). **Deliberately a separate component from
+  `../settings/PreorderInfoEditor.tsx`**, not a wider-configured variant
+  of it — that editor's narrow schema is documented there as a trust
+  boundary for `preorderInfoHtml`/`karenNotesHtml`, and loosening it to
+  add headings/tables/colours would weaken that guarantee for two
+  unrelated features. Same Tiptap `useEditor`/`EditorContent`/hidden-
+  field-on-`onUpdate` shape, its own independently-scoped schema.
+  "Copy & paste from Microsoft Word" needs no special handling — Tiptap/
+  ProseMirror already filters pasted HTML down to whatever the editor's
+  schema allows, so Word's own fonts/margins/track-changes markup get
+  stripped automatically while headings/bold/italic/lists/tables/links
+  survive.
+- **Image** — one photo (reuses the same preview-and-replace upload UI as
+  `BannerForm`'s image slots, run through `compressImageFile`, §2.17's
+  compression fix, before staging) plus an optional caption.
+- **Gallery** — unlimited photos via a multi-image picker modeled closely
+  on `ProductImageManager.tsx` (drag-reorder, `DataTransfer`-synced
+  hidden file input, `existing:<url>`/`new:<n>` order tokens — keyed by
+  the image's own URL rather than a database row id, since gallery images
+  aren't separate rows, just entries in `PageSection.data.images[]`),
+  extended with a caption per photo. Rendered as a grid whose column
+  count is picked from the image count: 1 → full width (natural aspect
+  ratio, not cropped), 2 → 2 columns, 3 → 3 columns, 4 → 2×2, 5+ → a
+  responsive wrap (`grid-cols-2 sm:grid-cols-3 lg:grid-cols-4`). Every
+  2+-count cell is `aspect-square object-cover` — the same crop-to-fill
+  convention `ProductCard`'s photo and every admin thumbnail grid in this
+  app already use.
+- **Button** — button text, a URL, and an "open in new tab" checkbox;
+  renders as a pill CTA matching the site's existing button language.
+- **Divider** — no configurable fields; renders a plain `border-t` rule.
+
+#### 2.20.5 Customer-facing rendering
+
+`src/components/event-pages/SectionRenderer.tsx` (Server Component) reads
+each section's `type` and renders the matching view. A Text section's
+saved HTML renders via `dangerouslySetInnerHTML` into the shared
+`.rich-text` class (extended this sprint, §2.15/§12, to also style
+`h2`/`h3`/`table`/`th`/`td`/`hr` — text colour and alignment are inline
+`style` attributes Tiptap applies directly, needing no extra CSS). A wide
+table uses `display: block; overflow-x: auto` on the `<table>` element
+itself so it scrolls within its own bounds rather than ever forcing the
+whole page to scroll horizontally — "no horizontal scrolling" from the
+brief, achieved without a wrapper `<div>` since this HTML comes straight
+from Tiptap's own output.
+
+#### 2.20.6 `/[slug]` — the dynamic catch-all route
+
+A single `src/app/[slug]/page.tsx` serves **every** `EventPage` by its
+`slug` column — `/how-to-preorder`, `/about-event`, and any future
+admin-created page, all through the same file. This is exactly what
+"future pages added without architecture changes" needs: a brand-new
+`EventPage` row becomes reachable at its URL immediately, with zero new
+route files. Next always resolves a static route (`/checkout`,
+`/product`, etc.) before a dynamic one at the same level, so nothing
+existing can ever be shadowed. Renders the standard `SiteHeader` +
+`CartDrawer` + `WishlistDrawer` (same full-catalog-fetch pattern as
+`/product/[id]`, so the header's cart/wishlist icons work identically
+here) + the page's sections + `Footer`.
+
+#### 2.20.7 Homepage nav pills
+
+`EventPageNavPills.tsx` — two outline-pill links ("How to Pre-order,"
+"About the Event") rendered directly under `<HeroCarousel />` and before
+`<EventInfoStrip />` on the homepage. Deliberately its own component, not
+folded into `FilterGroups`/`ProductToolbar`, so it stays structurally
+separate from Product Filters per the brief's explicit requirement.
+Styling matches `FilterChips`'/unselected-`VariantPills`' existing
+outline-pill language rather than introducing a new pill treatment.
+
 ---
 
 ## 3. Screens (complete list, exactly as they behave today)
@@ -829,6 +999,7 @@ and the dataset is boutique-event-sized, not web-scale.
 | Collection | `/collections/[id]` | Public | Products in one tag — Email Collection Cards link here (§2.16.4) |
 | Collections index | `/collections` | Public | Every collection, square image + name |
 | Unsubscribe | `/unsubscribe/[token]` | Public (token-based) | Sets `PreOrder.unsubscribedAt`, confirmation message (§2.16.4) |
+| Event Page | `/[slug]` (e.g. `/how-to-preorder`, `/about-event`) | Public | One `EventPage`'s title + sections, full header/drawers/footer (§2.20.6) |
 | Admin login | `/admin/login` | Public | Password form |
 | Admin dashboard | `/admin` | Admin session required | Stat tiles + quick links |
 | Admin product list | `/admin/products` | Admin session required | Product table |
@@ -847,6 +1018,9 @@ and the dataset is boutique-event-sized, not web-scale.
 | Admin pre-order detail | `/admin/preorders/[id]` | Admin session required | Full order detail |
 | Admin Purchase Dashboard | `/admin/purchases` | Admin session required | Summary tiles, progress bar, mobile-first Buying List with filters/sort/CSV/print (§2.18) |
 | Admin Analytics Dashboard | `/admin/analytics` | Admin session required | Wishlist/order interest signals, Recent Activity feed (§2.19) |
+| Admin Event Pages list | `/admin/event-pages` | Admin session required | Page List, seeded-page upsert-on-visit, + Add Page (§2.20.2) |
+| Admin add Event Page | `/admin/event-pages/new` | Admin session required | Title/slug form |
+| Admin Page Builder | `/admin/event-pages/[id]` | Admin session required | Title/slug form + section list (add/reorder/duplicate/delete/edit) (§2.20.2–2.20.4) |
 | 404 (not found) | any unmatched path | Public | Next.js's default, unstyled not-found page — still no custom `not-found.tsx` |
 
 ---
@@ -1085,6 +1259,28 @@ logging failure never blocks the real write it's attached to:
 (`wishlist_added` — see §2.19's Recent Activity note for the one known gap
 this last trigger point has).
 
+### 4.7d `EventPage` (new in Sprint 4)
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `String` (cuid) | Primary key |
+| `slug` | `String` | `@unique` — e.g. `"how-to-preorder"`. Validated against `RESERVED_SLUGS`/`PROTECTED_SLUGS` in `src/lib/validations/event-page.ts` (§2.20.2) |
+| `title` | `String` | Shown as the page's `<h1>` and in the admin Page List |
+| `sortOrder` | `Int` | Default `0` — admin Page List display order |
+| `createdAt` / `updatedAt` | `DateTime` | Auto-managed |
+| `sections` | `PageSection[]` | One-to-many, cascade on delete |
+
+### 4.7e `PageSection` (new in Sprint 4)
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `String` (cuid) | Primary key |
+| `pageId` | `String` | FK → `EventPage.id`, `onDelete: Cascade` |
+| `type` | `String` | `"text"` \| `"image"` \| `"gallery"` \| `"button"` \| `"divider"` — open string, not an enum, same reasoning as `ActivityLog.type`/`Product.status` (§2.20.1) |
+| `data` | `Json` | Per-type shape, validated at the application boundary (§2.20.4) — Prisma's native `Json` type, parsed/serialized automatically by Prisma Client |
+| `sortOrder` | `Int` | Default `0` — the section's position on the page |
+| `createdAt` / `updatedAt` | `DateTime` | Auto-managed |
+
 ### 4.8 Migration history (Sprint 1's expand-then-contract sequence)
 
 Because the dev database already held **real data** by the time this
@@ -1122,7 +1318,10 @@ workaround needed this time (no NULL-vs-UNIQUE warning to route around).
 one new nullable `variantId` column each on `WishlistItem`/`OrderItem`
 (plus `OrderItem.variantName`), and one new `ActivityLog` table —
 `prisma migrate dev` applied cleanly on the first attempt, preserving all
-existing data.
+existing data. **Sprint 4** added two brand-new tables (`EventPage`,
+`PageSection`) with no columns on any existing table at all — the
+simplest possible additive shape, `prisma migrate dev` applied cleanly on
+the first attempt.
 
 ### 4.9 Entity relationships
 
@@ -1141,6 +1340,7 @@ PreOrder ──(one-to-many, cascade on delete)── OrderItem
 PreOrder ──(one-to-many, cascade on delete)── WishlistItem
 PreOrder ──(many-to-many)── EmailDigest (recipients)
 EmailDigest ──(one-to-many, cascade on delete)── EmailDigestItem
+EventPage ──(one-to-many, cascade on delete)── PageSection
 HeroBanner, SiteSettings, OrderSequence, ActivityLog — standalone, no FKs
   (ActivityLog.productId is a plain nullable string, not a real FK)
 ```
@@ -1174,6 +1374,9 @@ directory. Every write is a Next.js Server Action.
 | `generateEmail` | `admin/(protected)/emails/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Saves the Notification Centre form onto the current draft `EmailDigest`, computes/snapshots New Products + Price Updates, advances `Product.lastNotifiedPriceCents`, computes recipients, renders + saves `renderedHtml` (§2.16.3). Never calls `emailService.send()` |
 | `updateTagImage` | `admin/(protected)/collections/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Uploads/removes a `Tag`'s square Collection Card image |
 | `updatePurchaseStatus` | `admin/(protected)/purchases/actions.ts` | `requireAdmin()` | **New in Sprint 3.5.** Updates `Product.purchaseStatus` or `ProductVariant.purchaseStatus` (whichever applies) for one Buying List row (§2.18) |
+| `createEventPage` / `updateEventPage` / `deleteEventPage` | `admin/(protected)/event-pages/actions.ts` | `requireAdmin()` | **New in Sprint 4.** `EventPage` CRUD — slug uniqueness/reserved-word checks on create, slug locked + delete refused for `PROTECTED_SLUGS` (§2.20.2) |
+| `addSection` / `deleteSection` / `duplicateSection` / `reorderSections` | same file | `requireAdmin()` | **New in Sprint 4.** Section list management — `reorderSections` mirrors `reorderBanners`' one-`$transaction`-of-index-updates shape exactly (§2.20.3) |
+| `updateTextSection` / `updateImageSection` / `updateGallerySection` / `updateButtonSection` | same file | `requireAdmin()` | **New in Sprint 4.** One dedicated, per-type-validated action per section type — image/gallery variants upload via `storage.save`, run new files through `compressImageFile` (§2.20.4) |
 
 Still no API rate limiting, no API key/token auth, no separate backend
 service — the "API" and the web app remain the same Next.js process.
@@ -1215,11 +1418,13 @@ src/
 │   │                                 reuses components/catalog/ProductCard
 │   ├── unsubscribe/[token]/page.tsx NEW (Sprint 3) — sets PreOrder.unsubscribedAt
 │   │                                 directly (§5's Server Action exception)
+│   ├── [slug]/page.tsx            NEW (Sprint 4) — the Event Pages CMS's single
+│   │                                 catch-all route, serves every EventPage (§2.20.6)
 │   └── admin/
 │       ├── login/                 Unchanged
 │       └── (protected)/
 │           ├── layout.tsx           Nav includes Banners/Collections/Emails/
-│           │                         Purchases/Analytics/Settings (Sprint 3.5)
+│           │                         Purchases/Analytics/Event Pages/Settings (Sprint 4)
 │           ├── products/            Extended: type/status, ProductImageManager,
 │           │                         + isNew "Mark as New" checkbox (Sprint 3);
 │           │                         + ProductVariantManager.tsx (Sprint 3.5, §2.17)
@@ -1228,6 +1433,15 @@ src/
 │           ├── purchases/           NEW (Sprint 3.5) — page.tsx, PurchaseBuyingList.tsx,
 │           │                         actions.ts (updatePurchaseStatus) — §2.18
 │           ├── analytics/           NEW (Sprint 3.5) — page.tsx, read-only (§2.19)
+│           ├── event-pages/         NEW (Sprint 4) — the Event Pages CMS admin:
+│           │   ├── page.tsx           Page List, upserts the two seeded pages (§2.20.2)
+│           │   ├── new/page.tsx       Add Page form
+│           │   ├── [id]/page.tsx      Page Builder — title/slug form + section list
+│           │   ├── actions.ts         Page + section CRUD (§5)
+│           │   ├── EventPageForm.tsx, PageSectionList.tsx, SectionCard.tsx
+│           │   ├── TextSectionEditor.tsx, ImageSectionEditor.tsx,
+│           │   │   GallerySectionEditor.tsx, ButtonSectionEditor.tsx
+│           │   └── EventSectionRichTextEditor.tsx  Wider Tiptap editor (§2.20.4)
 │           ├── emails/              NEW (Sprint 3) — Notification Centre:
 │           │   ├── page.tsx           draft editor + live preview
 │           │   ├── NotificationCentreForm.tsx
@@ -1253,9 +1467,13 @@ src/
 │   │   ├── SiteHeader.tsx           Centered logo (minmax(0,1fr) grid), 2x size;
 │   │   │                             wishlist icon swaps ♡→❤️ at count > 0 (Sprint 2)
 │   │   ├── FloatingAdminButton.tsx
-│   │   └── Footer.tsx               Contact Us / Shipping Policy links
+│   │   └── Footer.tsx               + How to Pre-order / About the Event links (Sprint 4)
+│   ├── event-pages/
+│   │   └── SectionRenderer.tsx      NEW (Sprint 4) — renders text/image/gallery/
+│   │                                 button/divider sections (§2.20.5)
 │   ├── home/
 │   │   ├── HeroCarousel.tsx         Responsive picture-based rotation
+│   │   ├── EventPageNavPills.tsx    NEW (Sprint 4) — the two homepage nav pills (§2.20.7)
 │   │   └── EventInfoStrip.tsx       Event info + live countdown
 │   ├── cart/
 │   │   ├── CartContext.tsx          localStorage-persisted cart state;
@@ -1336,6 +1554,9 @@ src/
         ├── settings.ts                + preorderInfoHtml field;
         │                               + email settings fields (Sprint 3)
         ├── email-digest.ts            NEW (Sprint 3) — Notification Centre form schema
+        ├── event-page.ts              NEW (Sprint 4) — SECTION_TYPES, RESERVED_SLUGS,
+        │                               PROTECTED_SLUGS, slugSchema, eventPageFormSchema,
+        │                               per-section-type data schemas (§2.20)
         └── utils.ts                   Unchanged
 ```
 
@@ -1419,6 +1640,21 @@ codebase: `useState` (pills, same pattern as every other client toggle),
 vanilla approach — no CSV precedent existed anywhere in the codebase
 before this sprint), `window.print()` + a `@media print` CSS block (first
 one in the project), and Tailwind's built-in `print:` variant.
+
+**Sprint 4 added four new packages, all extending the already-justified
+Tiptap exception** (originally adopted in the UI Refinement Pass, §13) —
+not a new dependency decision: `@tiptap/extension-table`,
+`@tiptap/extension-text-style`, `@tiptap/extension-color`,
+`@tiptap/extension-text-align`. All four are official first-party Tiptap
+packages, same major version line as the already-installed
+`@tiptap/react`/`@tiptap/starter-kit`. (`@tiptap/extension-table` already
+bundles `TableRow`/`TableCell`/`TableHeader` internally, so the
+equivalent standalone packages were never added — kept the dependency
+list to exactly what's actually imported.) Everything else this sprint —
+drag-reorder, the emoji picker, the responsive gallery grid, the
+`display: block; overflow-x: auto` table-scroll technique — uses only
+framework/browser primitives already established elsewhere in this
+codebase.
 
 ## 8. Project Structure (top level)
 
@@ -1937,6 +2173,29 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
     unique-constraint pitfall entirely. A future purchase-order/supplier
     model could absorb this later without touching the customer-facing
     schema, since nothing customer-visible reads these two fields.
+- **Named directly in the Sprint 4 brief's "Future Compatibility"
+  section, explicitly not built this sprint** — every one of these is a
+  new `PageSection.type` value plus a new Zod data schema, not a schema
+  migration, because of the `type: String` + `data: Json` shape chosen in
+  §2.20.1:
+  - *Video* — a `{ url, caption? }` shape, structurally identical to the
+    Image section already built.
+  - *FAQ Accordion* — a `{ items: [{ question, answer }] }` shape, same
+    "array of small objects" pattern the Gallery section's `images[]`
+    already establishes.
+  - *Countdown Timer* — could reuse `SiteSettings.countdownTargetAt`'s
+    existing live-updating client component (`EventInfoStrip`'s
+    countdown logic, §2.1) rather than duplicating it, with its own
+    `targetAt` stored in the section's `data`.
+  - *Google Map* — a `{ embedUrl }` or `{ lat, lng }` shape; rendering an
+    iframe/static map needs no new backend logic.
+  - *Embedded Instagram Posts* / *Embedded YouTube Videos* — a
+    `{ url }` shape rendering the platform's own oEmbed/iframe embed.
+  - *Product Carousel* — the one section type genuinely reaching back
+    into this app's own data (a `{ productIds: string[] }` or
+    `{ tagId }` shape, querying `Product` at render time) rather than
+    being fully self-contained like the other five — worth noting since
+    it's a different shape of complexity from the rest.
 
 ---
 
@@ -2016,3 +2275,19 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
 - **High Interest Products**: a documented heuristic on the Analytics
   Dashboard — `wishlistCount − orderedQuantity`, descending — surfacing
   products customers save but haven't committed to ordering yet (§2.19).
+- **`EventPage`**: one CMS-managed content page (§2.20) — a `title`, a
+  unique `slug` (its URL), and an ordered list of `PageSection`s. Reached
+  at `/{slug}` via the single `/[slug]` catch-all route (§2.20.6).
+- **Section** / **`PageSection`**: one content block on an `EventPage` —
+  Text, Image, Gallery, Button, or Divider this sprint (§2.20.4). One
+  table with an open `type` string and a `Json` `data` blob, deliberately
+  chosen so a future type needs no migration (§2.20.1).
+- **Protected slug**: `how-to-preorder` or `about-event` — the two seeded
+  pages' slugs, which can't be changed, and the pages themselves can't be
+  deleted, because the homepage nav pills and the site footer link to
+  those exact URLs (§2.20.2).
+- **Reserved slug**: one of the 8 existing top-level route segments
+  (`admin`, `api`, `checkout`, `collections`, `my-preorders`, `order`,
+  `product`, `unsubscribe`) that a new `EventPage`'s slug is blocked from
+  using, so an admin never creates a page that's silently unreachable
+  behind a real route (§2.20.2).

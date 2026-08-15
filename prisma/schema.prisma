@@ -359,3 +359,51 @@ model ActivityLog {
   productId String?
   createdAt DateTime @default(now())
 }
+
+// --- Event Pages CMS (Sprint 4) ---
+//
+// A lightweight, block-based CMS so Karen can write/edit event content
+// (How to Pre-order, About the Event, and future pages like FAQ or a
+// Wholesale Portal) herself, with no code changes. Every page is reached
+// at /{slug} via a single catch-all route — a brand-new EventPage row is
+// live at its URL immediately, no new route file needed.
+model EventPage {
+  id        String   @id @default(cuid())
+  // "how-to-preorder", "about-event", "faq", ... — validated against
+  // RESERVED_SLUGS (existing top-level routes) and PROTECTED_SLUGS (the
+  // two seeded pages below) in src/lib/validations/event-page.ts.
+  slug      String   @unique
+  title     String
+  // Admin Page List display order — unrelated to section order below.
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sections PageSection[]
+}
+
+// One content block on an EventPage. Deliberately ONE table with an open
+// `type` string + a Json `data` blob, not one table per section type —
+// this is what lets a future section type (Video, FAQ Accordion,
+// Countdown Timer, Google Map, embedded Instagram/YouTube, Product
+// Carousel — all explicitly named as future-only in the Sprint 4 brief)
+// be added as a new `type` value and a new Zod schema in
+// src/lib/validations/event-page.ts, with no migration. Same reasoning
+// already used for ActivityLog.type in Sprint 3.5.
+model PageSection {
+  id        String    @id @default(cuid())
+  pageId    String
+  page      EventPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  // "text" | "image" | "gallery" | "button" | "divider" — see
+  // SECTION_TYPES in src/lib/validations/event-page.ts.
+  type      String
+  // Per-type shape (e.g. text: {title?, html}; gallery: {images: [{url,
+  // caption?}]}) — validated at the application boundary, not by the DB.
+  // Prisma's native Json type (stored as TEXT on SQLite, parsed/
+  // serialized automatically by Prisma Client) — no manual
+  // JSON.parse/stringify needed at read/write sites.
+  data      Json
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}

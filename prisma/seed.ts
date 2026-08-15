@@ -85,6 +85,11 @@ const products = [
   },
 ];
 
+const eventPages = [
+  { slug: "how-to-preorder", title: "How to Pre-order", sortOrder: 0 },
+  { slug: "about-event", title: "About the Event", sortOrder: 1 },
+];
+
 async function main() {
   for (const p of products) {
     const { tags, ...data } = p;
@@ -100,6 +105,20 @@ async function main() {
       },
     });
     console.log(`Upserted product: ${p.brand} — ${p.name}`);
+  }
+
+  // Sprint 4 — the two seeded Event Pages the homepage nav pills and
+  // footer link to. The real guarantee (works on staging without a
+  // manual seed run) is the equivalent upsert inside
+  // /admin/event-pages's Server Component; this is for a from-scratch
+  // local dev database.
+  for (const page of eventPages) {
+    await db.eventPage.upsert({
+      where: { slug: page.slug },
+      update: { title: page.title, sortOrder: page.sortOrder },
+      create: page,
+    });
+    console.log(`Upserted event page: ${page.title}`);
   }
 }
 

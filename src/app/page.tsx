@@ -4,6 +4,7 @@ import { SiteHeader } from "@/components/layout/SiteHeader";
 import { FloatingAdminButton } from "@/components/layout/FloatingAdminButton";
 import { Footer } from "@/components/layout/Footer";
 import { HeroCarousel } from "@/components/home/HeroCarousel";
+import { EventPageNavPills } from "@/components/home/EventPageNavPills";
 import { EventInfoStrip } from "@/components/home/EventInfoStrip";
 import { ProductBrowser } from "@/components/catalog/ProductBrowser";
 import { CartDrawer } from "@/components/cart/CartDrawer";
@@ -40,6 +41,7 @@ export default async function HomePage() {
     <div className="flex min-h-screen flex-col">
       <SiteHeader logoUrl={settings?.logoUrl ?? null} />
       <HeroCarousel banners={banners} />
+      <EventPageNavPills />
       <EventInfoStrip
         eventName={settings?.eventName ?? null}
         eventLocation={settings?.eventLocation ?? null}

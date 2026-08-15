@@ -2,6 +2,64 @@
 
 Notable changes to the Shokakko Australia pre-order site, newest first.
 
+## Sprint 4 — Event Pages CMS (2026-08-15)
+
+Transforms the site into a small Event Platform: a block-based CMS Karen
+can use to write and update site content herself — How to Pre-order,
+About the Event, and any future page (FAQ, Privacy Policy, Wholesale
+Information, ...) — with no code changes. **This sprint does not modify
+any existing pre-order/checkout/product/variant/purchase/analytics
+functionality** — every touch to existing files is additive (two nav
+pills, two footer links, one admin nav link).
+
+### Added
+
+- **Event Pages admin** (`/admin/event-pages`) — a Page List (with the
+  two seeded pages, How to Pre-order and About the Event, guaranteed to
+  exist on first visit) and a Page Builder per page (`/admin/event-pages/
+  [id]`) supporting **+ Add Section**, drag-and-drop reordering,
+  Duplicate, Delete, and Collapse/Expand, for five section types:
+  - **Text** — title + a rich text editor supporting headings, bold,
+    italic, bullet/numbered lists, hyperlinks, tables (insert, add row/
+    column, delete), a horizontal rule, text colour, text alignment, and
+    an emoji picker. Pasting from Microsoft Word works — the editor's own
+    schema filters pasted content down to what it supports, keeping
+    formatting on-brand automatically.
+  - **Image** — one photo with an optional caption, resized responsively.
+  - **Gallery** — any number of photos in a grid that adapts by count (1
+    → full width, 2 → 2 columns, 3 → 3 columns, 4 → 2×2, 5+ → a
+    responsive wrap), each maintaining its crop and never overflowing the
+    page.
+  - **Button** — text, URL, and an "open in new tab" option.
+  - **Divider** — a plain visual line between sections.
+- **Two customer pages**: `/how-to-preorder` and `/about-event`, plus a
+  single `/[slug]` route that automatically serves any future page an
+  admin creates — no new route file needed per page.
+- **Two nav pills** under the homepage hero banner ("How to Pre-order,"
+  "About the Event"), kept structurally separate from the Product
+  Filters.
+- **Two new footer links** (How to Pre-order, About the Event), alongside
+  the existing Contact Us / Shipping Policy links.
+- **`EventPage`/`PageSection` schema** — one open `type` string +
+  a `Json` `data` column per section, deliberately chosen so a future
+  section type (Video, FAQ Accordion, Countdown Timer, Google Map,
+  embedded Instagram/YouTube, Product Carousel — all named in the brief
+  as future-only) needs a new type value and a new validation schema, not
+  a migration. None of those are implemented this sprint.
+
+### Fixed (found during this sprint's own verification)
+
+- **Tiptap toolbar buttons could steal focus from the editor mid-command**
+  — clicking a plain `<button>` shifts DOM focus to it by default, which
+  can clear the editor's active text selection before a formatting
+  command runs against it. Added the standard Tiptap fix
+  (`onMouseDown={(e) => e.preventDefault()}` on every toolbar control) to
+  the new rich text editor.
+- **A wide table could force the whole page to scroll horizontally** —
+  `.rich-text table` now uses `display: block; overflow-x: auto` so a
+  table scrolls within its own bounds instead, matching "no horizontal
+  scrolling" from the brief.
+
 ## Hero banner upload fix (2026-08-14)
 
 ### Fixed
