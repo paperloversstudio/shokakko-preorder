@@ -1241,23 +1241,30 @@ triggered before this sprint) now fires automatically 24 hours before
 countdown itself is one site-wide field (a future multi-event feature
 would need to move this per-event, see §16). `src/app/api/cron/emails/route.ts`
 — **this project's first API route** — is the single entrypoint, called
-hourly by Vercel Cron (`vercel.json`), authenticated via a bearer-token
-check against `CRON_SECRET` (Vercel sends this header automatically for
-a configured cron once the env var exists; anything else gets `401`).
-Each run: (1) sweeps and retries any `EmailLog` stuck `pending`/`sending`
-for over 10 minutes (§2.22.1), and (2) if the countdown is set, in the
-future, and within 24 hours, and `SiteSettings.reminderBatchSentAt` is
-still `null` for it, sends the batch to every eligible `PreOrder`
-(`unsubscribedAt: null`, `notifyReminderBeforeClose: true`, has an
-`editToken`) and stamps `reminderBatchSentAt`. **Changing the countdown
-target in `/admin/settings` re-arms the guard** — `updateSiteSettings`
-resets `reminderBatchSentAt` back to `null` whenever
-`countdownTargetAt` itself changes, so a newly-set or moved event gets
-its own fresh reminder cycle. If the account's Vercel plan restricts
-cron frequency (Hobby tier allows once daily), the window-based
-eligibility check degrades gracefully to a 24–48h lead time with zero
-code changes — only the schedule string in `vercel.json` would need
-editing.
+once daily by Vercel Cron (`vercel.json`, `0 20 * * *` — Vercel's Hobby
+plan, which this deployment is on, rejects any cron schedule running
+more than once a day; it enforces this at deploy time, and the very
+first deploy attempt with an hourly schedule silently blocked *every*
+deployment for this project, not just the cron itself, until caught and
+fixed during this sprint's own staging rollout), authenticated via a
+bearer-token check against `CRON_SECRET` (Vercel sends this header
+automatically for a configured cron once the env var exists; anything
+else gets `401`). Each run: (1) sweeps and retries any `EmailLog` stuck
+`pending`/`sending` for over 10 minutes (§2.22.1), and (2) if the
+countdown is set, in the future, and within 24 hours, and
+`SiteSettings.reminderBatchSentAt` is still `null` for it, sends the
+batch to every eligible `PreOrder` (`unsubscribedAt: null`,
+`notifyReminderBeforeClose: true`, has an `editToken`) and stamps
+`reminderBatchSentAt`. **Changing the countdown target in
+`/admin/settings` re-arms the guard** — `updateSiteSettings` resets
+`reminderBatchSentAt` back to `null` whenever `countdownTargetAt` itself
+changes, so a newly-set or moved event gets its own fresh reminder
+cycle. Because the check is window-based (≤24h away, not "exactly now"),
+a daily cron still gives every customer at least 24h notice — in
+practice a 24–48h lead time depending on what time of day the cron
+happens to run relative to the countdown target. Upgrading to Vercel's
+Pro plan later would allow an hourly schedule for a tighter window, with
+no code changes — only the schedule string in `vercel.json`.
 
 #### 2.22.7 Environment
 
@@ -2502,12 +2509,16 @@ New or changed in Sprint 6:
     sent**, indefinitely — no retention/pruning policy exists yet. Fine
     at this app's exhibition-scale volume, but would need a cleanup job
     if this platform ran continuously for a long time.
-28. **The Reminder Email's actual lead time depends on the account's
-    Vercel Cron plan tier** — configured hourly in `vercel.json` (close
-    to a true 24h lead), but a Hobby-tier account limited to once-daily
-    cron would see a 24–48h lead instead, since the eligibility check is
-    window-based (§2.22.6) rather than exact-time. No code change needed
-    either way, only the cron schedule string.
+28. **The Reminder Email runs once daily** (`vercel.json`'s `0 20 * * *`)
+    because this deployment is on Vercel's Hobby plan, which rejects any
+    more-frequent cron schedule at deploy time — discovered the hard way
+    during this sprint's own staging rollout, when an initially-hourly
+    schedule silently blocked every deployment for the project, not just
+    the cron (§2.22.6). Since the eligibility check is window-based
+    (≤24h away, not exact-time), every customer still gets at least 24h
+    notice — in practice 24–48h depending on time-of-day. Upgrading to
+    Pro would allow a tighter, closer-to-24h schedule with no code
+    change, only the schedule string.
 29. **No automated tests exist for any Sprint 6 trigger** (checkout →
     Confirmation, Send Update's personalization loop, the cron route) —
     same "no automated tests" gap this document already carries forward

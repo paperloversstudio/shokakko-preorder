@@ -36,9 +36,10 @@ app to Resend specifically.
 - **Automatic Reminder Email** — fires 24 hours before the event
   countdown closes, via a new cron route
   (`src/app/api/cron/emails/route.ts`, this project's first API route)
-  on an hourly Vercel Cron schedule. Event name, countdown, an Edit My
-  Pre-order button, contact info. Respects each customer's own "Remind
-  me 24 hours before preorder closes" preference.
+  on a daily Vercel Cron schedule (Hobby-plan limit — see Fixed, below).
+  Event name, countdown, an Edit My Pre-order button, contact info.
+  Respects each customer's own "Remind me 24 hours before preorder
+  closes" preference.
 - **A real "Send Update"** — the Notification Centre's Send Update
   button now actually sends, personalizing each recipient's copy
   against their own New Products/Price Updates notification
@@ -91,6 +92,15 @@ work, not built — see the PRD's Future Ideas.
   `countdownTargetAt` itself changes — verified idempotent across
   repeated cron hits, and re-armed correctly after changing the
   countdown.
+- **`vercel.json`'s original hourly cron schedule silently blocked every
+  deployment for this project**, not just the cron job — discovered
+  during this sprint's own staging rollout, when the Sprint 6 push
+  (and everything after it) never produced a deployment at all, with no
+  visible error anywhere until manually triggering a deployment through
+  Vercel's dashboard surfaced "Hobby accounts are limited to daily cron
+  jobs." Fixed by changing the schedule to once daily
+  (`0 20 * * *`) — see the PRD's §2.22.6 and Known Issue 28 for the
+  trade-off this means for the Reminder Email's exact lead time.
 
 ## Sprint 5 — Customer Self-Service Portal (2026-08-20)
 
