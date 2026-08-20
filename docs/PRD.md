@@ -49,6 +49,23 @@ timeline and a new admin Order History section (§2.11). **No real email
 provider is wired up this sprint either** (confirmed before building) —
 sending still logs to the console, same as every email-shaped feature
 since Sprint 3; see §2.16.4/§15.
+**9.0** (Sprint 6 — Communication Platform): connects the Email
+Architecture, Self-Service Portal, and Notification Centre into one real
+communication platform (§2.22). A live `resendEmailService` (§2.16.4)
+behind the existing `EmailService` interface — the first email this
+project has ever actually sent. Confirmation Email now fires
+automatically on checkout, the Edit Link Email now really sends (§2.6),
+and a new automatic Reminder Email goes out 24 hours before the event
+countdown closes, all driven by this project's first-ever `src/app/api/`
+route on a Vercel Cron schedule. The Notification Centre's "Send
+Update" button is real: it personalizes New Products/Price Updates per
+recipient's own notification preferences (§2.21's toggles, unused until
+now), adds a new automatically-computed **Sold Out** section, and only
+marks its "already notified" checkpoints (`lastNotifiedPriceCents`,
+the new `lastNotifiedStatus`, `isNew`) once every send has actually been
+attempted — not at Generate time as before. A new `EmailLog` table (§4.7g)
+is the Email Queue every real send goes through, backing two new admin
+screens: Email Logs (§2.22.4) and a Notification Dashboard (§2.22.5).
 **Scope of this document:** Every claim below is derived from reading the
 actual source code, database schema, and migrations in this repository.
 Nothing here describes a feature that is not already implemented. Where
@@ -547,13 +564,18 @@ checkout page's rendered output. An empty/untouched editor
 an empty paragraph, so the checkout page simply doesn't render the block
 when nothing's been written.
 
-### 2.16 Email Communication System (Sprint 3)
+### 2.16 Email Communication System (Sprint 3; real sending as of Sprint 6)
 
-**No real email provider is wired up this sprint** (per your explicit
-scope decision) — everything below builds the complete template system,
-the admin authoring/preview experience, and the architecture for sending,
-but nothing ever actually leaves the server. "Generate Email" renders and
-saves HTML and prepares recipient data; it never calls `emailService.send()`.
+Built in Sprint 3 as a complete template system, admin authoring/preview
+experience, and architecture for sending — with no real provider wired up
+and nothing ever actually leaving the server. **Sprint 6 (§2.22) is what
+actually connects it**: a real `resendEmailService`, every template
+routed through a new Email Queue, and every trigger point (checkout,
+"Retrieve My Pre-order," the Notification Centre's Send Update, an
+automatic 24h-before-close Reminder) now really fires. The rest of this
+section (§2.16.1–2.16.4) still describes the underlying template system
+exactly as built in Sprint 3, since it needed no changes — see §2.22 for
+what actually sends and when.
 
 #### 2.16.1 Email Design System
 
@@ -618,16 +640,18 @@ trade-off.
   (template-specific, reuses `SiteSettings.countdownTargetAt`, the same
   field the homepage's `EventInfoStrip` already shows), CTA Button,
   Footer. Also a **placeholder layout**.
-- **Edit Link Email** (`EditLinkEmail.tsx`, **new in Sprint 5**) — Header,
-  Greeting, CTA Button (the edit link), Footer. The one template this
-  sprint actually wires to a real trigger — `requestEditLink` (§2.6) —
-  though "wired" still means the console driver, same as every other
-  template (§2.16.4).
+- **Edit Link Email** (`EditLinkEmail.tsx`, new in Sprint 5) — Header,
+  Greeting, CTA Button (the edit link), Footer.
 
-Neither Confirmation nor Reminder is wired to an automatic trigger point
-this sprint (no send-on-checkout, no scheduled reminder) — both are only
-reachable via their admin preview pages (§2.16.5). Wiring a real trigger
-is Sprint 4 territory, once actual sending exists.
+**As of Sprint 6** (§2.22), every one of these four templates has a real
+automatic trigger: Confirmation fires from `submitPreOrder` on checkout,
+Edit Link fires from `requestEditLink` (§2.6), Reminder fires from the
+new cron route 24 hours before `SiteSettings.countdownTargetAt`, and
+Update fires from the Notification Centre's real "Send Update." Through
+Sprint 5, none of that existed — this paragraph is kept only as a record
+of that history; `/admin/emails/confirmation` and `/admin/emails/reminder`
+(§2.16.3) remain useful as manual preview harnesses independent of the
+real triggers.
 
 #### 2.16.3 Notification Centre (`/admin/emails`)
 
@@ -640,44 +664,52 @@ Collections/products to feature, subject, and CTA text/URL — then clicks
 **Generate Email**, which:
 
 1. Saves whatever's currently in the form onto the draft.
-2. Computes **New Products** (`Product.isNew: true`, active) and
-   **Price Updates** (active products whose `priceCents` differs from
-   their `lastNotifiedPriceCents` baseline — products with no baseline
-   yet are excluded, nothing to compare against) from live product state.
-3. Snapshots both into `EmailDigestItem` rows (replacing this draft's
-   prior snapshot, so re-generating reflects current state, not
+2. Computes **New Products** (`Product.isNew: true`, active), **Price
+   Updates** (active products whose `priceCents` differs from their
+   `lastNotifiedPriceCents` baseline — products with no baseline yet are
+   excluded, nothing to compare against), and — **new in Sprint 6** —
+   **Sold Out** (`status: "sold_out"`, not yet flagged via the new
+   `Product.lastNotifiedStatus` — §2.22.2) from live product state.
+3. Snapshots all three into `EmailDigestItem` rows (replacing this
+   draft's prior snapshot, so re-generating reflects current state, not
    duplicates) — same "snapshot, not live reference" reasoning as
    `OrderItem` vs. `WishlistItem` elsewhere in this schema, so a digest's
    history stays accurate even after the product changes again.
-4. **Advances `lastNotifiedPriceCents`** to the current price for every
-   product just captured — this is the diff-consuming checkpoint for this
-   sprint, since there's no real send yet to hang it off.
-   `lastNotifiedPriceCents` is also seeded to a product's starting price
-   automatically on creation, so its very first edit is correctly
-   detectable without needing a prior digest.
-5. Computes `recipients` (every `PreOrder` with `unsubscribedAt: null`)
+4. Computes `recipients` (every `PreOrder` with `unsubscribedAt: null`)
    and `recipientCount` — "prepare all required recipient data."
-6. Renders the final HTML (`renderUpdateEmail`) and saves it to
+5. Renders the final HTML (`renderUpdateEmail`) and saves it to
    `renderedHtml`; sets `status: "generated"`.
 
+**As of Sprint 6, Generate Email no longer advances
+`lastNotifiedPriceCents`** (or the new `lastNotifiedStatus`/`isNew`
+checkpoints) — through Sprint 5 it did, "since there's no real send yet
+to hang it off." Now that sending is real (§2.22.2), those checkpoints
+only advance once `sendDigest()` has actually attempted every recipient's
+send — Generate can be clicked and re-clicked freely without silently
+consuming the diff it's only supposed to preview.
+
 The page also shows a **live preview** (an `<iframe srcDoc>`) of the
-current draft, refreshed on every Generate. A disabled "Send Update —
-coming in Sprint 4" button sits next to Generate Email for continuity
-with the original brief's language.
+current draft, refreshed on every Generate, plus (**new in Sprint 6**) a
+real **Send Update** button next to Generate Email — disabled until a
+`generated` draft exists. See §2.22.2 for exactly what it does.
 
 **Personalization caveat**: the saved `renderedHtml` is *one*
-representative preview render (a generic placeholder name), not what
-every recipient would actually receive — `renderUpdateEmail()` is fully
-parameterized per-recipient already, so real per-recipient rendering at
-send time is a small addition for whichever sprint wires up sending.
+representative preview render (a generic placeholder name, every section
+toggled on), not what every recipient actually receives — **as of Sprint
+6**, a real send personalizes the New Products/Price Updates sections per
+recipient's own notification preferences (§2.22.3), so some customers'
+copies are shorter than this preview. The preview page says so explicitly.
 
 `/admin/emails/history` lists every digest ever generated (newest first);
 `/admin/emails/history/[id]` shows a past digest's saved render plus
 exactly which sections/products/collections were captured, read-only.
-Since nothing is ever marked `"sent"` this sprint, history will show one
-entry that keeps updating each time Generate Email runs — multiple rows
-only start appearing once a future sprint adds a way to finalize/send a
-digest and start a fresh draft.
+Through Sprint 5, nothing was ever marked `"sent"`, so history showed one
+entry that kept updating each time Generate Email ran. **As of Sprint
+6**, clicking Send Update sets `status: "sent"` and that row becomes
+immutable history — the next Generate Email creates a fresh draft, so
+multiple rows now accumulate over time, one per actual send. See
+`/admin/emails/logs` (§2.22.4) for the individual per-recipient sends
+behind any one "sent" row.
 
 `/admin/emails/confirmation` and `/admin/emails/reminder` are simple
 preview harnesses — pick any existing real `PreOrder` from a dropdown,
@@ -720,14 +752,18 @@ render that template against it live. Nothing is persisted.
   instruction, and nothing needed to change at its call sites.
 - **`EmailService` interface** (`src/lib/email/types.ts`) — swappable
   send abstraction, same pattern as `StorageAdapter`
-  (`src/lib/storage/types.ts`). Its only implementation through Sprint 4,
-  `consoleEmailService`, just logs — nothing called `.send()` at all
-  before Sprint 5. **Sprint 5's `requestEditLink` (§2.6) is the first
-  real call site** — still against the console driver (confirmed with you
-  before building, §2.16.4/§15), so "sending" still just logs. A real
-  driver (Resend, Brevo, SES, ...) plugs in behind this interface later
-  with no changes needed anywhere that already imports `emailService`; no
-  provider is hard-coded, per your explicit instruction.
+  (`src/lib/storage/types.ts`). Its only implementation through Sprint 5,
+  `consoleEmailService`, just logs — nothing called `.send()` for real
+  before Sprint 5's `requestEditLink` (§2.6), and even that stayed
+  against the console driver. **As of Sprint 6** (§2.22.1), a second
+  implementation, `resendEmailService` (`src/lib/email/resend.ts`), sends
+  through the [Resend](https://resend.com) API — selected via
+  `EMAIL_DRIVER=resend` (local dev defaults to unset, i.e. console).
+  Swapping to a different provider later (SES, Brevo, SMTP) is the same
+  shape again: one new file implementing `EmailService`, one new `case`
+  in `getEmailService()` (`src/lib/email/index.ts`), no changes anywhere
+  that already imports `emailService` — the interface itself needed zero
+  changes to accommodate a real provider, exactly as designed in Sprint 3.
 
 ### 2.17 Product Variants (Sprint 3.5)
 
@@ -1063,13 +1099,16 @@ out to match exactly what was asked for this section.
 products are added," "...when product prices are updated," "Remind me 24
 hours before preorder closes" — each backed by a `PreOrder` boolean
 column, saving the instant it's toggled (no Save button, per the
-explicit "save immediately" requirement). **Stored and fully editable
-this sprint; not yet consumed by anything** — `EmailDigest`'s recipient
-list (§2.16.3) is still a broadcast to every non-unsubscribed order, same
-gap Sprint 3's PRD already documented ("Wishlist/Pre-order-targeted
-digest recipients... not built"). Wiring these preferences into real
-send-targeting is exactly the kind of future work this schema is now
-ready for, not built here.
+explicit "save immediately" requirement). Through Sprint 5, **stored and
+fully editable but not yet consumed by anything** — `EmailDigest`'s
+recipient list (§2.16.3) was still a broadcast to every non-unsubscribed
+order. **As of Sprint 6** (§2.22.3), `notifyNewProducts`/
+`notifyPriceUpdates` personalize a real digest send per recipient (each
+section is only included if the digest's own toggle *and* that
+recipient's own preference are both on), and `notifyReminderBeforeClose`
+gates the automatic Reminder Email batch. Karen's Notes/Collections/
+Karen's Picks/Sold Out remain un-gated — every non-unsubscribed recipient
+the admin included sees those regardless of their preference checkboxes.
 
 **Order Timeline**: a plain-language history — "Order Created," then
 "Updated" for every change after that (regardless of its real type — the
@@ -1090,6 +1129,141 @@ Full site chrome (`SiteHeader` + `CartDrawer` + `WishlistDrawer`, same
 full-catalog-fetch pattern as `/product/[id]` and the Sprint 4 `/[slug]`
 route) so the header's cart/wishlist icons behave identically to every
 other page on the site.
+
+### 2.22 Communication Platform (Sprint 6)
+
+Connects the Email Communication System (§2.16), the Self-Service
+Portal's notification preferences (§2.21), and the Notification Centre
+into one real platform: a live provider, automatic triggers at every
+point a customer or admin would expect an email, and admin visibility
+into what actually sent. **Provider-independent by design** — nothing
+built this sprint couples the app to Resend specifically; see §2.16.4.
+
+#### 2.22.1 Email Queue (`src/lib/email/queue.ts`)
+
+A new `EmailLog` table (§4.7g) that every real send goes through first —
+"Queue → Worker → Resend" as three functions over that table, not
+separate infrastructure (no Redis/queue service anywhere in this stack,
+and this app's volume is exhibition-scale — tens to low-hundreds of
+recipients, not thousands):
+
+- **`enqueueEmail()`** — the "Queue" step. Writes a `pending` `EmailLog`
+  row (recipient, subject, HTML, template, and an optional link to the
+  `PreOrder`/`EmailDigest` it's for) and nothing else.
+- **`processEmailLog(id)`** — the "Worker" step. Loads the row, marks it
+  `sending`, calls the configured `EmailService`, and records the outcome
+  — `sent` (with the provider's message id) or `failed` (with the real
+  error message). Safe to call more than once on the same row, which is
+  exactly what a Retry click or the cron sweep below does.
+- **`sendTrackedEmail()`** — enqueue + process back-to-back; every real
+  send site in this app calls this instead of `emailService.send()`
+  directly, which is what makes every attempt show up in Email Logs
+  (§2.22.4) automatically, with no per-call-site logging code.
+
+A stuck `pending`/`sending` row (a crash mid-request, a provider outage
+between attempts) is swept up and retried by the cron route (§2.22.6)
+whenever it's been sitting for more than 10 minutes — the closest thing
+to a real background worker this app has, and enough at this scale.
+
+#### 2.22.2 Confirmation, Edit Link, and the real "Send Update"
+
+- **Confirmation Email** now fires automatically at the end of
+  `submitPreOrder`, right after the existing `ActivityLog`/
+  `OrderHistoryEntry` inserts — best-effort, same as those two, so a
+  provider outage never breaks checkout (the attempt still lands in
+  Email Logs as `failed`, visible for Karen to retry). The Secure Edit
+  Token is never shown as visible text, only as the CTA button's `href`.
+- **"Retrieve My Pre-order"** (`requestEditLink`, §2.6) now routes
+  through `sendTrackedEmail` instead of the raw `EmailService` — its
+  privacy behavior (identical response regardless of whether an order
+  exists) needed no changes, since a send failure was already
+  best-effort and swallowed before this sprint.
+- **"Send Update"** (`sendDigest()`, `src/app/admin/(protected)/emails/actions.ts`)
+  is the Notification Centre's real send action, replacing the
+  disabled placeholder button. Requires a `generated` draft. Re-derives
+  New Products/Price Updates/Sold Out from live product state (the same
+  functions Generate Email used) rather than trusting the saved
+  `EmailDigestItem` snapshot, so a send always reflects the freshest
+  catalogue truth even if something changed between Generate and Send —
+  the snapshot stays a historical record for `/admin/emails/history`.
+  Loops every non-unsubscribed `PreOrder`, personalizes per recipient
+  (§2.22.3), skips a recipient entirely if nothing would show them
+  anything, and sends one `sendTrackedEmail()` call per recipient — "only
+  ONE email per customer" is structural, not a dedup step. Only after
+  every attempted send does it advance the "mark as published"
+  checkpoints (`lastNotifiedPriceCents`, the new
+  `Product.lastNotifiedStatus`, `isNew`) and flip the digest to `"sent"`.
+
+#### 2.22.3 Sold Out & per-recipient personalization
+
+- **Sold Out** is a new, automatically-computed Update Email section
+  (`computeSoldOutCandidates()`), following the exact same "checkpoint"
+  pattern Price Updates already used: a new `Product.lastNotifiedStatus`
+  baseline (§4.1), candidates are products with `status: "sold_out"` not
+  yet flagged as notified, and it's cleared back to `null` whenever a
+  product's status is saved as anything other than `"sold_out"` — so a
+  restock-then-sell-out cycle is picked up as a fresh candidate again. A
+  new "Show Sold Out" toggle on `NotificationCentreForm.tsx` matches the
+  existing New Products/Price Updates checkbox exactly.
+- **Personalization** applies only to the three preferences that exist
+  (§2.21) — `notifyNewProducts`/`notifyPriceUpdates` gate their sections
+  per recipient; Karen's Notes/Collections/Karen's Picks/Sold Out are not
+  preference-gated and reach every non-unsubscribed recipient the admin
+  included. The Notification Centre's preview shows the "maximal"
+  version (every section on, as if every recipient opted into
+  everything) with a caption noting some customers' real copies may be
+  shorter.
+
+#### 2.22.4 Email Logs (`/admin/emails/logs`, new)
+
+Every attempted send, any status, newest first, reading directly from
+`EmailLog`: Recipient, Template, Status (badge), Sent time, Provider,
+Error message, and a **Retry** button on any `failed` row (re-runs
+`processEmailLog` via a new `retryEmailLog` Server Action). Linked from
+`/admin/emails`'s header alongside the existing "View history" link.
+
+#### 2.22.5 Notification Dashboard (`/admin/emails/dashboard`, new)
+
+At-a-glance health of the whole platform: **Emails Sent Today**,
+**Pending Emails**, **Failed Emails** (three `EmailLog` count tiles,
+same visual convention as the Purchase Dashboard's summary tiles), a
+short **Daily Digest History** recap (linking to the existing
+`/admin/emails/history`), and **Reminder History** — grouped by the
+calendar day reminder `EmailLog` rows were sent, since every reminder
+send already produces its own log row and no separate "batch" table was
+needed.
+
+#### 2.22.6 Reminder Email & the cron route (new)
+
+The Reminder Email (`ReminderEmail.tsx`, built in Sprint 3, never
+triggered before this sprint) now fires automatically 24 hours before
+`SiteSettings.countdownTargetAt` — site-wide, not per-order, since the
+countdown itself is one site-wide field (a future multi-event feature
+would need to move this per-event, see §16). `src/app/api/cron/emails/route.ts`
+— **this project's first API route** — is the single entrypoint, called
+hourly by Vercel Cron (`vercel.json`), authenticated via a bearer-token
+check against `CRON_SECRET` (Vercel sends this header automatically for
+a configured cron once the env var exists; anything else gets `401`).
+Each run: (1) sweeps and retries any `EmailLog` stuck `pending`/`sending`
+for over 10 minutes (§2.22.1), and (2) if the countdown is set, in the
+future, and within 24 hours, and `SiteSettings.reminderBatchSentAt` is
+still `null` for it, sends the batch to every eligible `PreOrder`
+(`unsubscribedAt: null`, `notifyReminderBeforeClose: true`, has an
+`editToken`) and stamps `reminderBatchSentAt`. **Changing the countdown
+target in `/admin/settings` re-arms the guard** — `updateSiteSettings`
+resets `reminderBatchSentAt` back to `null` whenever
+`countdownTargetAt` itself changes, so a newly-set or moved event gets
+its own fresh reminder cycle. If the account's Vercel plan restricts
+cron frequency (Hobby tier allows once daily), the window-based
+eligibility check degrades gracefully to a 24–48h lead time with zero
+code changes — only the schedule string in `vercel.json` would need
+editing.
+
+#### 2.22.7 Environment
+
+New env vars (`.env.example`): `EMAIL_DRIVER=resend` (unset/`"console"`
+for local dev, unchanged), `RESEND_API_KEY`, `EMAIL_FROM` (a verified
+Resend sender address), `CRON_SECRET`.
 
 ---
 
@@ -1116,8 +1290,10 @@ other page on the site.
 | Admin add banner | `/admin/banners/new` | Admin session required | `BannerForm` (create mode) |
 | Admin edit banner | `/admin/banners/[id]` | Admin session required | `BannerForm` (edit mode) + Delete |
 | Admin collections | `/admin/collections` | Admin session required | Tag list, inline square-image upload (§2.16.4) |
-| Admin Notification Centre | `/admin/emails` | Admin session required | Update Email draft editor + live preview + Generate Email (§2.16.3) |
-| Admin email history | `/admin/emails/history`, `/history/[id]` | Admin session required | Past generated digests, read-only detail |
+| Admin Notification Centre | `/admin/emails` | Admin session required | Update Email draft editor + live preview + Generate Email + Send Update (§2.16.3, §2.22.2) |
+| Admin email history | `/admin/emails/history`, `/history/[id]` | Admin session required | Past generated/sent digests, read-only detail |
+| Admin Email Logs | `/admin/emails/logs` | Admin session required | Every attempted send, any status, with Retry (§2.22.4) |
+| Admin Notification Dashboard | `/admin/emails/dashboard` | Admin session required | Sent-today/pending/failed tiles, Daily Digest + Reminder history (§2.22.5) |
 | Admin Confirmation preview | `/admin/emails/confirmation` | Admin session required | Live preview against a real order |
 | Admin Reminder preview | `/admin/emails/reminder` | Admin session required | Live preview against a real order |
 | Admin settings | `/admin/settings` | Admin session required | Logo/event/countdown form + Email settings (§2.10, §2.16.4) |
@@ -1154,7 +1330,8 @@ expand-then-contract sequence (§4.7).
 | `status` | `String` | **New in Sprint 1**, default `"active"` — `"active"` \| `"draft"` \| `"sold_out"`. Replaces the removed `isActive` boolean |
 | `sortOrder` | `Int` | Default `0`; ascending sort key |
 | `isNew` | `Boolean` | **New in Sprint 3**, default `false` — manual "🆕 Mark as New" admin toggle for the Update Email's New Products section (§2.16.4) |
-| `lastNotifiedPriceCents` | `Int?` | **New in Sprint 3** — Price Updates baseline; seeded to `priceCents` on create, advanced only by "Generate Email" (§2.16.3) |
+| `lastNotifiedPriceCents` | `Int?` | **New in Sprint 3** — Price Updates baseline; seeded to `priceCents` on create, advanced only by a real Send Update (§2.22.2, moved from Generate Email as of Sprint 6) |
+| `lastNotifiedStatus` | `String?` | **New in Sprint 6** — Sold Out checkpoint, same pattern as `lastNotifiedPriceCents` above. `null` until a Send Update includes this product as sold-out (§2.22.3); reset back to `null` whenever the product's status is saved as anything other than `"sold_out"` |
 | `variantGroupName` | `String?` | **New in Sprint 3.5** — free text ("Design," "Colour," …); `null` = this product has no variants (§2.17) |
 | `purchaseStatus` | `String` | **New in Sprint 3.5**, default `"not_purchased"` — Purchase Dashboard checklist status, used only for a variant-less product (§2.18) |
 | `createdAt` / `updatedAt` | `DateTime` | Auto-managed |
@@ -1234,6 +1411,7 @@ reflected in the admin UI (the "+ Add banner" button hides at 5).
 | `preorderInfoHtml` | `String?` | **New in this pass** — admin-authored rich text (Tiptap), rendered above the checkout form; see §2.15 |
 | `emailHeroImageUrl` / `emailHeroLinkUrl` | `String?` | **New in Sprint 3** — the Update Email's one Hero Banner image + optional link (§2.16.1) |
 | `emailContactUrl` / `emailShippingPolicyUrl` / `emailWebsiteUrl` / `emailInstagramUrl` | `String?` | **New in Sprint 3** — admin-configurable email Footer links, independent of the site-wide `Footer.tsx` component (which stays hardcoded) |
+| `reminderBatchSentAt` | `DateTime?` | **New in Sprint 6** — guards the automatic Reminder Email batch (§2.22.6) against sending twice for the same `countdownTargetAt`. Reset to `null` by `updateSiteSettings` whenever `countdownTargetAt` itself changes |
 | `updatedAt` | `DateTime` | Auto-managed |
 
 Lazily created via `upsert` on first save (`updateSiteSettings`) — no
@@ -1286,8 +1464,9 @@ Sprint 1 (nullable `productId`/`SetNull`), plus two Sprint 3.5 additions
 | `wishlistItems` | `WishlistItem[]` | **New in Sprint 2** — see §4.7a. |
 | `unsubscribedAt` | `DateTime?` | **New in Sprint 3** — set when this customer clicks Unsubscribe (§2.16.4); excludes them from every future `EmailDigest`'s `recipients`. |
 | `receivedDigests` | `EmailDigest[]` | **New in Sprint 3** — which digests counted this order as a recipient (computed at generate time). |
-| `notifyNewProducts` / `notifyPriceUpdates` / `notifyReminderBeforeClose` | `Boolean` | **New in Sprint 5**, default `true` each — customer-managed notification preferences, editable from the Self-Service Portal (§2.21). Stored and saveable; **not yet consumed** by `EmailDigest` recipient targeting, which remains a broadcast (see `EmailDigest`'s own note, §4.7b). |
+| `notifyNewProducts` / `notifyPriceUpdates` / `notifyReminderBeforeClose` | `Boolean` | **New in Sprint 5**, default `true` each — customer-managed notification preferences, editable from the Self-Service Portal (§2.21). **As of Sprint 6**, actually consumed: the first two personalize `sendDigest()`'s per-recipient content, the third gates the automatic Reminder Email batch (§2.22.2/§2.22.6). |
 | `historyEntries` | `OrderHistoryEntry[]` | **New in Sprint 5** — see §4.7f. |
+| `emailLogs` | `EmailLog[]` | **New in Sprint 6** — every email ever attempted to this order, see §4.7g. |
 
 The only functional change to `orderNumber` itself is **how** it's
 generated (§2.7) — the column didn't change shape. "Last Updated," shown
@@ -1327,28 +1506,31 @@ One prepared Update Email — see §2.16.3 for the full mechanics.
 | Field | Type | Notes |
 |---|---|---|
 | `id` | `String` (cuid) | Primary key |
-| `status` | `String` | Default `"draft"` — `"draft"` \| `"generated"` \| `"sent"` (`"sent"` unused until a future sprint wires real sending) |
+| `status` | `String` | Default `"draft"` — `"draft"` \| `"generated"` \| `"sent"` (`"sent"` real as of Sprint 6, §2.22.2 — set by `sendDigest()`, at which point the row becomes immutable history) |
 | `subject` | `String` | Default `"Shokakko Australia — Latest Updates"` |
 | `karenNotesHtml` | `String?` | Same Tiptap-authored HTML pattern as `SiteSettings.preorderInfoHtml` |
-| `showKarenNotes` / `showCollections` / `showRecommended` / `showNewProducts` / `showPriceUpdates` | `Boolean` | Section toggles, all default `false` |
+| `showKarenNotes` / `showCollections` / `showRecommended` / `showNewProducts` / `showPriceUpdates` / `showSoldOut` | `Boolean` | Section toggles, all default `false`. `showSoldOut` **new in Sprint 6** (§2.22.3) |
 | `ctaText` / `ctaUrl` | `String` | Defaults `"View New Products"` / `"/"` |
-| `renderedHtml` | `String?` | Saved by Generate Email — one representative preview render, not per-recipient (§2.16.3) |
-| `recipientCount` | `Int?` | Computed at generate time |
+| `renderedHtml` | `String?` | Saved by Generate Email — one representative preview render, not per-recipient (§2.16.3, §2.22.3) |
+| `recipientCount` | `Int?` | Through Sprint 5, set at generate time. **As of Sprint 6**, set by `sendDigest()` to the actual number of recipients sent to (personalization can skip a recipient — §2.22.3) |
 | `generatedAt` | `DateTime?` | Set by Generate Email |
 | `collections` | `Tag[]` | Admin-picked, implicit many-to-many |
 | `recommendedProducts` | `Product[]` | Admin-picked ("Karen's Picks"), implicit many-to-many |
-| `recipients` | `PreOrder[]` | Computed at generate time — every non-unsubscribed `PreOrder` |
+| `recipients` | `PreOrder[]` | Computed at generate time — every non-unsubscribed `PreOrder`. **As of Sprint 6**, `sendDigest()` re-queries this fresh at send time rather than trusting this snapshot, in case subscriptions changed between Generate and Send |
 | `items` | `EmailDigestItem[]` | Computed sections, snapshotted — see below |
+| `emailLogs` | `EmailLog[]` | **New in Sprint 6** — every per-recipient send attempt behind this digest, see §4.7g |
 
 `EmailDigestItem` snapshots the **computed** sections (New Products,
-Price Updates) at generate time — unlike `collections`/`recommendedProducts`
-(admin-picked, so a live relation is fine), these are automatic, so a row
-is captured per item with `kind` (`"new"` \| `"price_update"`),
-`productName`, `priceCents`, and (for `price_update` only)
-`previousPriceCents` — same "snapshot vs. live-reference" reasoning as
-`OrderItem` vs. `WishlistItem`, so a digest's history stays accurate even
-if the product's price changes again afterward, or the product is deleted
-(`productId` is nullable, `SetNull`).
+Price Updates, and — **new in Sprint 6** — Sold Out) at generate time —
+unlike `collections`/`recommendedProducts` (admin-picked, so a live
+relation is fine), these are automatic, so a row is captured per item
+with `kind` (`"new"` \| `"price_update"` \| `"sold_out"`), `productName`,
+`priceCents`, and (for `price_update` only) `previousPriceCents` — same
+"snapshot vs. live-reference" reasoning as `OrderItem` vs. `WishlistItem`,
+so a digest's history stays accurate even if the product's price changes
+again afterward, or the product is deleted (`productId` is nullable,
+`SetNull`). **As of Sprint 6**, `sendDigest()` re-derives live candidates
+rather than reading these snapshot rows back — see §2.22.2 for why.
 
 ### 4.7c `ActivityLog` (new in Sprint 3.5)
 
@@ -1422,6 +1604,29 @@ simply start from whatever the first change after Sprint 5 happens to be
 real `type`, not its position, specifically to handle this correctly —
 see §2.21).
 
+### 4.7g `EmailLog` (new in Sprint 6)
+
+The Email Queue every real send goes through — see §2.22.1 for the full
+"Queue → Worker → Resend" mechanics.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `String` (cuid) | Primary key |
+| `to` / `subject` / `html` | `String` | The exact email actually sent (or attempted) |
+| `template` | `String` | `"confirmation"` \| `"edit_link"` \| `"reminder"` \| `"digest"` |
+| `status` | `String` | Default `"pending"` — `"pending"` \| `"sending"` \| `"sent"` \| `"failed"` |
+| `provider` | `String?` | Which `EmailService` driver actually handled the attempt — `"resend"` \| `"console"` |
+| `providerMessageId` | `String?` | The provider's own id for a successful send |
+| `errorMessage` | `String?` | Set on `"failed"` — the real error, shown in Email Logs (§2.22.4) |
+| `attempts` | `Int` | Default `0`, incremented every time `processEmailLog` runs (a fresh send, a Retry click, or a cron sweep retry all increment this) |
+| `preOrderId` | `String?` | FK → `PreOrder.id`, `SetNull` — nullable so a log row survives its order being deleted |
+| `digestId` | `String?` | FK → `EmailDigest.id`, `SetNull` — set only for `template: "digest"` rows |
+| `createdAt` / `sentAt` | `DateTime` / `DateTime?` | `createdAt` is when it was queued; `sentAt` is set only on success |
+
+Indexed on `status` (the cron sweep's stuck-row query, §2.22.6) and
+`[template, sentAt]` (the Notification Dashboard's Reminder History
+grouping, §2.22.5).
+
 ### 4.8 Migration history (Sprint 1's expand-then-contract sequence)
 
 Because the dev database already held **real data** by the time this
@@ -1464,7 +1669,12 @@ existing data. **Sprint 4** added two brand-new tables (`EventPage`,
 simplest possible additive shape, `prisma migrate dev` applied cleanly on
 the first attempt. **Sprint 5** added three `Boolean` columns on
 `PreOrder` plus one new table (`OrderHistoryEntry`) — additive again,
-applied cleanly on the first attempt, no data loss.
+applied cleanly on the first attempt, no data loss. **Sprint 6** added
+one `Boolean` column on `EmailDigest` (`showSoldOut`), one nullable
+`String` column on `Product` (`lastNotifiedStatus`), one nullable
+`DateTime` column on `SiteSettings` (`reminderBatchSentAt`), and one new
+table (`EmailLog`) — additive again, applied cleanly on the first
+attempt, no data loss.
 
 ### 4.9 Entity relationships
 
@@ -1500,28 +1710,33 @@ pre-order submission, then lives in the database attached to that
 
 ## 5. API Structure
 
-Still **no conventional REST or JSON API routes** — no `src/app/api/`
-directory. Every write is a Next.js Server Action.
+Every write is still a Next.js Server Action. **As of Sprint 6**, one
+conventional API route exists — `src/app/api/cron/emails/route.ts`, this
+project's first `src/app/api/` file, a `GET` handler for Vercel Cron
+(§2.22.6), not a Server Action and not reachable by the browser app
+itself. Everything else below remains a Server Action.
 
 | Action | File | Auth | Behavior |
 |---|---|---|---|
 | `loginAction` | `admin/login/actions.ts` | None | Verifies password, sets session cookie |
 | `logoutAction` | `admin/(protected)/actions.ts` | Admin session (via layout) | Clears session cookie |
-| `createProduct` / `updateProduct` / `deleteProduct` | `admin/(protected)/products/actions.ts` | `requireAdmin()` | Product CRUD, now including multi-image resolution (§2.8) and variant-row resolution (§2.17) — also feeds `ActivityLog` (`product_added`, and `price_updated` when `priceCents` actually changes) |
+| `createProduct` / `updateProduct` / `deleteProduct` | `admin/(protected)/products/actions.ts` | `requireAdmin()` | Product CRUD, now including multi-image resolution (§2.8) and variant-row resolution (§2.17) — also feeds `ActivityLog` (`product_added`, and `price_updated` when `priceCents` actually changes). **As of Sprint 6**, `updateProduct` also clears `Product.lastNotifiedStatus` back to `null` whenever `status` is saved as anything other than `"sold_out"` (§2.22.3) |
 | `createBanner` / `updateBanner` / `deleteBanner` | `admin/(protected)/banners/actions.ts` | `requireAdmin()` | Banner CRUD, enforces the 5-banner cap on create |
 | `toggleBannerActive` | same file | `requireAdmin()` | Single-field enable/disable, used by the drag-list's inline toggle |
 | `reorderBanners` | same file | `requireAdmin()` | Batch `sortOrder` update from a drag-and-drop reorder |
-| `updateSiteSettings` | `admin/(protected)/settings/actions.ts` | `requireAdmin()` | Upserts the `SiteSettings` singleton, now including `preorderInfoHtml` |
+| `updateSiteSettings` | `admin/(protected)/settings/actions.ts` | `requireAdmin()` | Upserts the `SiteSettings` singleton, now including `preorderInfoHtml`. **As of Sprint 6**, also resets `reminderBatchSentAt` back to `null` whenever `countdownTargetAt` itself changes, re-arming the Reminder Email guard (§2.22.6) |
 | `updatePreOrderStatus` | `admin/(protected)/preorders/actions.ts` | `requireAdmin()` | Updates `PreOrder.status` |
-| `submitPreOrder` | `app/order/actions.ts` | None (public) | Validates, re-fetches products **and variants** server-side, generates the next sequential order number and a secure `editToken`, creates the order (snapshotting each item's variant, §2.17) + wishlist migration (§2.3), sets the `shokakko_preorder_token` cookie, feeds `ActivityLog` (`order_submitted`) and — **new in Sprint 5** — `OrderHistoryEntry` (`order_created`) |
+| `submitPreOrder` | `app/order/actions.ts` | None (public) | Validates, re-fetches products **and variants** server-side, generates the next sequential order number and a secure `editToken`, creates the order (snapshotting each item's variant, §2.17) + wishlist migration (§2.3), sets the `shokakko_preorder_token` cookie, feeds `ActivityLog` (`order_submitted`) and — **new in Sprint 5** — `OrderHistoryEntry` (`order_created`) — and **new in Sprint 6** — a best-effort automatic Confirmation Email via `sendTrackedEmail` (§2.22.2) |
 | `toggleWishlistItem` | `components/wishlist/actions.ts` | None (public — scoped by the caller's cookie-derived token, not a login) | **New in Sprint 2**, extended in Sprint 3.5 with an optional `variantId` parameter. Looks up the `PreOrder` by `editToken`, no-ops silently if not found, otherwise creates/deletes the matching `WishlistItem` row (validating the variant actually belongs to the product first) and, on create, feeds `ActivityLog` (`wishlist_added`, §2.19). Called by `WishlistContext` once a wishlist is in linked mode (§2.3), and — **new in Sprint 5** — reused directly by the Self-Service Portal's wishlist Remove button (§2.21), no wrapper needed |
-| `generateEmail` | `admin/(protected)/emails/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Saves the Notification Centre form onto the current draft `EmailDigest`, computes/snapshots New Products + Price Updates, advances `Product.lastNotifiedPriceCents`, computes recipients, renders + saves `renderedHtml` (§2.16.3). Never calls `emailService.send()` |
+| `generateEmail` | `admin/(protected)/emails/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Saves the Notification Centre form onto the current draft `EmailDigest`, computes/snapshots New Products + Price Updates + (**new in Sprint 6**) Sold Out, computes recipients, renders + saves `renderedHtml` (§2.16.3). **As of Sprint 6**, no longer advances `lastNotifiedPriceCents` (moved to `sendDigest`, below) and never calls `emailService.send()` itself |
+| `sendDigest` | same file | `requireAdmin()` | **New in Sprint 6.** The real "Send Update" — requires a `generated` draft, loops every non-unsubscribed recipient with per-recipient personalization, sends via `sendTrackedEmail`, then advances every "mark as published" checkpoint and sets `status: "sent"` (§2.22.2) |
+| `retryEmailLog` | same file | `requireAdmin()` | **New in Sprint 6.** Re-runs the Email Queue's worker step (`processEmailLog`) on one existing `EmailLog` row — the Email Logs page's Retry button (§2.22.4) |
 | `updateTagImage` | `admin/(protected)/collections/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Uploads/removes a `Tag`'s square Collection Card image |
 | `updatePurchaseStatus` | `admin/(protected)/purchases/actions.ts` | `requireAdmin()` | **New in Sprint 3.5.** Updates `Product.purchaseStatus` or `ProductVariant.purchaseStatus` (whichever applies) for one Buying List row (§2.18) |
 | `createEventPage` / `updateEventPage` / `deleteEventPage` | `admin/(protected)/event-pages/actions.ts` | `requireAdmin()` | **New in Sprint 4.** `EventPage` CRUD — slug uniqueness/reserved-word checks on create, slug locked + delete refused for `PROTECTED_SLUGS` (§2.20.2) |
 | `addSection` / `deleteSection` / `duplicateSection` / `reorderSections` | same file | `requireAdmin()` | **New in Sprint 4.** Section list management — `reorderSections` mirrors `reorderBanners`' one-`$transaction`-of-index-updates shape exactly (§2.20.3) |
 | `updateTextSection` / `updateImageSection` / `updateGallerySection` / `updateButtonSection` | same file | `requireAdmin()` | **New in Sprint 4.** One dedicated, per-type-validated action per section type — image/gallery variants upload via `storage.save`, run new files through `compressImageFile` (§2.20.4) |
-| `requestEditLink` | `app/my-preorders/actions.ts` | None (public) | **New in Sprint 5.** Looks up the most recent `PreOrder` by email, sends the Edit Link Email if found — always returns the identical message regardless of outcome (§2.6) |
+| `requestEditLink` | `app/my-preorders/actions.ts` | None (public) | **New in Sprint 5.** Looks up the most recent `PreOrder` by email, sends the Edit Link Email if found via `sendTrackedEmail` (**as of Sprint 6** — was the raw `EmailService` through Sprint 5) — always returns the identical message regardless of outcome (§2.6) |
 | `linkBrowserToOrder` | `app/edit/[token]/actions.ts` | None (public — token-scoped, same bearer model as `toggleWishlistItem`) | **New in Sprint 5.** Called once on mount by `LinkBrowserOnMount.tsx`; sets the `shokakko_preorder_token` cookie so this browser's `WishlistContext` switches into linked mode against this order (§2.21) |
 | `updateOrderItemQuantity` / `updateOrderItemVariant` / `removeOrderItem` | same file | None (public, token-scoped) | **New in Sprint 5.** Re-fetches live product/variant data server-side on every change (never trusts client price/name data); each logs one `OrderHistoryEntry` |
 | `moveWishlistItemToOrder` | same file | None (public, token-scoped) | **New in Sprint 5.** Increments a matching existing `OrderItem` or creates one (same snapshot shape as `submitPreOrder`), then deletes the `WishlistItem` |
@@ -1804,8 +2019,9 @@ narrow as possible (just the rendering function; the 8 Design System
 components themselves are hand-built from plain `<table>`/`<img>`/`<a>`
 elements, not a bundled component library — see §2.16.1 for why
 `@react-email/components` was deliberately avoided). No email-sending
-package was added — `EmailService` (§2.16.4) has exactly one
-implementation this sprint, a console-logging no-op.
+package was added this sprint — `EmailService` (§2.16.4) had exactly one
+implementation, a console-logging no-op. **Resolved in Sprint 6** — see
+below.
 
 **Sprint 3.5 added zero new dependencies.** Variant pills, the composite
 cart/wishlist keying, CSV export, and print styles are all built from
@@ -1830,6 +2046,23 @@ drag-reorder, the emoji picker, the responsive gallery grid, the
 `display: block; overflow-x: auto` table-scroll technique — uses only
 framework/browser primitives already established elsewhere in this
 codebase.
+
+**Sprint 5 added zero new dependencies** — the entire Self-Service Portal
+(the linking mechanism, the customer-info form, the Order Timeline) reuses
+existing primitives and existing components (`VariantPills`,
+`QuantitySelector`, `orderFormSchema`) exactly as they already were.
+
+**Sprint 6 added one new dependency**: [`resend`](https://resend.com/docs)
+(the official Node SDK), for `resendEmailService` (§2.16.4, §2.22.1) — the
+first real email-sending package this project has ever installed. The
+`Resend` client is constructed lazily inside `send()`, not at module load,
+since `src/lib/email/resend.ts` is imported unconditionally by the driver
+selector regardless of which driver is active, and the SDK throws
+immediately if constructed without an API key — which would otherwise
+break every build/dev run that doesn't set `RESEND_API_KEY`. No queue/cron
+package was added either — the Email Queue (§2.22.1) and the cron sweep
+(§2.22.6) are both built from Prisma + a plain Next.js Route Handler +
+Vercel's own Cron feature, not a new dependency.
 
 ## 8. Project Structure (top level)
 
@@ -1875,9 +2108,15 @@ no code changes to point at a hosted database/Vercel Blob.
 Unchanged from PRD v1.0 through Sprint 2 — `DATABASE_URL`,
 `DATABASE_AUTH_TOKEN`, `ADMIN_PASSWORD`, `SESSION_SECRET`,
 `STORAGE_DRIVER`, `BLOB_READ_WRITE_TOKEN`. **Sprint 3 adds one**:
-`EMAIL_DRIVER` (defaults to `"console"`, the only implemented value —
-logs instead of sending; a future sprint adds a real provider value here,
-see §2.16.4/§15) (see `.env.example`).
+`EMAIL_DRIVER` (defaults to `"console"` — logs instead of sending, still
+the local-dev default as of Sprint 6). **Sprint 6 adds three more**, all
+required only when `EMAIL_DRIVER="resend"` (or, for `CRON_SECRET`, to
+authorize the cron route regardless of driver): `RESEND_API_KEY` (from
+the Resend dashboard), `EMAIL_FROM` (a verified Resend sender address,
+e.g. `"Shokakko Australia <preorders@shokakko.com.au>"`), and
+`CRON_SECRET` (protects `src/app/api/cron/emails/route.ts` — Vercel sends
+it automatically as a bearer token once both this var and a `vercel.json`
+cron entry exist) (see `.env.example`).
 
 ---
 
@@ -1934,9 +2173,25 @@ meaningfully, with two additions worth noting:
   explicitly now that the token guards real order mutations, not just a
   wishlist toggle.
 
----
+**New in Sprint 6**:
 
-## 12. UI Design Language
+- **`src/app/api/cron/emails/route.ts` is protected by a single static
+  bearer token** (`CRON_SECRET`) compared with `!==`, not a
+  constant-time comparison — same class of gap this document already
+  notes for the admin password check (this section's opening paragraph).
+  Low real-world risk given the route only sends emails and retries
+  queued rows (no data exposure, no destructive action), but worth
+  naming since it's this project's first genuinely public API endpoint.
+- **The cron route has no rate limiting either** — anyone who obtains
+  (or guesses) `CRON_SECRET` could trigger it repeatedly; the worst
+  outcome is duplicate reminder-sweep attempts, which the
+  `reminderBatchSentAt` guard (§2.22.6) already makes safe to repeat.
+- **`EmailLog.html` stores the full rendered email body**, including
+  every recipient's name/address/order details baked into that HTML —
+  this is necessary for Retry to work (§2.22.1) but means Email Logs
+  (an admin-only page) is now a second place, beyond the `PreOrder`
+  table itself, holding customer PII. No new exposure surface (admin
+  session required, same as every other admin page), just worth naming.
 
 The palette, shape language (`rounded-card`/`rounded-pill`), and
 soft-shadow elevation from PRD v1.0 are **unchanged**. **Typography
@@ -2079,10 +2334,10 @@ automated tests, no rate limiting, local storage/SQLite don't work on
 serverless hosting, no CSV export, no pagination on
 admin lists, `Math.random()`-based IDs elsewhere in the app, no custom
 404, unused `create-next-app` boilerplate assets). **Git repository now
-exists** (Milestone 1) — no longer a known issue. **"No email
-notifications" is now more precisely "no email is ever actually
-sent"** — Sprint 3 built the full template/authoring system, see §14's
-Sprint 3 items below and §15. New or changed this sprint:
+exists** (Milestone 1) — no longer a known issue. **"No email is ever
+actually sent" is resolved as of Sprint 6** (§2.22) — see items 13/15/16/
+24 below, all now struck through, and the new items under "New or
+changed in Sprint 6." New or changed this sprint:
 
 1. **Client-side-only search/sort/filtering** — `ProductBrowser` filters the
    *entire already-fetched* product list in the browser; there's no
@@ -2159,28 +2414,22 @@ New or changed in Sprint 2:
 
 New or changed in Sprint 3:
 
-13. **No email is ever actually sent** — `EmailService` has exactly one
-    implementation, a console-logging no-op (§2.16.4). "Generate Email"
-    only renders/saves HTML and prepares recipient data; nothing calls
-    `.send()`. Wiring a real provider is explicitly deferred (§15).
+13. ~~**No email is ever actually sent**~~ — **resolved in Sprint 6**
+    (§2.22.1) via `resendEmailService`. Kept here, struck through, for
+    the historical record and because §17's cross-references still point
+    at this item number.
 14. **Confirmation and Reminder are placeholder layouts** — no Canva
     design has been shared yet, per your explicit Sprint 3 answer. Their
     dynamic-field plumbing (customer name, order number, countdown, edit
     link) is complete and won't need to change once a real design arrives
     — only the template/component files will.
-15. **Email history effectively shows one growing entry, not many** —
-    since nothing is ever marked `"sent"` (item 13), the "current draft"
-    and "most recent history entry" are the same row until a future
-    sprint adds a way to finalize a digest. Not a bug, just what "no real
-    send yet" looks like in the history list (§2.16.3).
-16. **Price Updates only detects a change once, then goes quiet** — its
-    baseline (`Product.lastNotifiedPriceCents`) advances at Generate
-    Email time (not at an actual send, since none exists yet), so
-    clicking Generate Email twice in a row with no further price changes
-    shows an empty Price Updates section the second time — correct
-    behavior once real sending exists (a price shouldn't be reported
-    twice), but means testing this section repeatedly requires editing a
-    product's price again between generates.
+15. ~~**Email history effectively shows one growing entry, not many**~~ —
+    **resolved in Sprint 6**: Send Update sets `status: "sent"`, and each
+    sent digest becomes its own immutable history row (§2.22.2).
+16. ~~**Price Updates only detects a change once, then goes quiet**~~ —
+    **resolved in Sprint 6**: the baseline now advances at real Send
+    time, not at Generate time (§2.22.2), so Generate can be re-clicked
+    freely without consuming the diff it's only meant to preview.
 17. **`/unsubscribe/[token]` performs a write on a GET request** — the
     one exception to this app's Server-Actions-only mutation pattern,
     unavoidable for an email-client-clicked link (§5/§11).
@@ -2230,15 +2479,42 @@ New or changed in Sprint 5:
     `mode: "insensitive"` isn't available here — a real but low-impact
     limitation (email autofill/paste rarely changes case), documented
     rather than engineered around with a shadow normalized-email column.
-24. **Notification preferences don't yet change who receives anything** —
-    fully stored and customer-editable (§2.21), but `EmailDigest`'s
-    recipient list is still a broadcast to every non-unsubscribed order,
-    same gap Sprint 3's PRD already named. See §16.
+24. ~~**Notification preferences don't yet change who receives
+    anything**~~ — **resolved in Sprint 6**: `sendDigest()` personalizes
+    New Products/Price Updates per recipient's own preferences, and the
+    Reminder Email batch is gated by `notifyReminderBeforeClose` (§2.22.3,
+    §2.22.6).
 25. **No confirmation before a portal mutation applies** except Remove
     actions (native `window.confirm`) — a variant swap or quantity change
     saves the instant it's clicked, matching this app's established
     "instant save" convention for lists of inline controls elsewhere
     (Purchase Dashboard, Page Builder), not a gap specific to this sprint.
+
+New or changed in Sprint 6:
+
+26. **The cron route's bearer-token check is a plain string comparison**,
+    not constant-time, and there's no rate limiting on it either (§11) —
+    low real-world risk (the route only sends queued emails and retries
+    failed rows; `reminderBatchSentAt` already makes repeated triggering
+    safe), but worth knowing since it's this project's first genuinely
+    public API endpoint.
+27. **`EmailLog.html` stores the full rendered body of every email ever
+    sent**, indefinitely — no retention/pruning policy exists yet. Fine
+    at this app's exhibition-scale volume, but would need a cleanup job
+    if this platform ran continuously for a long time.
+28. **The Reminder Email's actual lead time depends on the account's
+    Vercel Cron plan tier** — configured hourly in `vercel.json` (close
+    to a true 24h lead), but a Hobby-tier account limited to once-daily
+    cron would see a 24–48h lead instead, since the eligibility check is
+    window-based (§2.22.6) rather than exact-time. No code change needed
+    either way, only the cron schedule string.
+29. **No automated tests exist for any Sprint 6 trigger** (checkout →
+    Confirmation, Send Update's personalization loop, the cron route) —
+    same "no automated tests" gap this document already carries forward
+    from PRD v1.0, now covering a larger, more failure-sensitive surface
+    (real money-adjacent customer communication). Verified manually this
+    sprint (console driver, one full send/receive cycle per trigger); a
+    real regression suite is future work.
 
 ---
 
@@ -2260,37 +2536,31 @@ excluded on purpose:
   (§2.18), a different export with different columns; the underlying
   `Blob`/download mechanic is generic and could be reused for a pre-order
   export later.
-- **A real `EmailService` driver** — still not built as of Sprint 5,
-  confirmed with you again before that sprint started rather than
-  assumed — Resend, Brevo, SES, or similar, implementing the interface
-  already defined in `src/lib/email/types.ts` (§2.16.4). This is what
-  turns "Generate Email" and `requestEditLink` (§2.6) into actual sends,
-  wires Confirmation Email to fire on checkout submission, gives Reminder
-  Email a real trigger (manual admin send vs. scheduled — undecided), and
-  moves per-recipient personalized rendering (already supported by
-  `renderUpdateEmail()`) from theoretical to real.
+- ~~**A real `EmailService` driver**~~ — **built in Sprint 6** as
+  `resendEmailService` (§2.16.4, §2.22.1). Confirmation now fires on
+  checkout, `requestEditLink` sends for real, Reminder has a real
+  automatic trigger (cron-driven, not manual — §2.22.6), and
+  per-recipient personalized rendering is real, not just supported
+  (§2.22.3).
 - **Real Canva-designed Confirmation and Reminder templates** — Sprint 3
-  shipped placeholder layouts for both, per your explicit answer; you'll
-  share the Canva exports in a future sprint and only the
+  shipped placeholder layouts for both; still placeholders as of Sprint
+  6, since a real send existing doesn't by itself require a new design.
+  You'll share the Canva exports in a future sprint and only the
   `components`/`templates` files need to change to adopt them (§2.16.1).
-- **Wishlist/Pre-order-targeted digest recipients** — named directly in
-  the original Sprint 3 brief's "Future Compatibility" section and
-  explicitly not built: today's `recipients` (§4.7b) is a broadcast to
-  every non-unsubscribed `PreOrder`. Narrowing it to "only customers with
-  this product in their wishlist/pre-order" doesn't need a schema change
-  — `EmailDigest`/`EmailDigestItem` already reference the specific
-  products involved, and `WishlistItem`/`OrderItem` already link
-  products back to `PreOrder`s — just new query logic at generate time.
-  **Sprint 5 built the customer-facing half of this** (the three
-  `notifyNewProducts`/`notifyPriceUpdates`/`notifyReminderBeforeClose`
-  preferences, §2.21) — what's still missing is the generate-time query
-  logic actually reading them.
-- **Scheduled daily digest** (e.g. automatically at 6:00 PM) — also named
-  in the original brief and explicitly not built. The Notification
-  Centre's "current draft" model (§2.16.3) doesn't block this: a
-  scheduled job would just need to call the same generate logic
-  `generateEmail` already implements, then (once real sending exists)
-  send and start a fresh draft.
+- ~~**Wishlist/Pre-order-targeted digest recipients**~~ — the
+  *preference*-based half (New Products/Price Updates/Reminder,
+  §2.21/§2.22.3) is **built in Sprint 6**. Still not built: narrowing
+  recipients to "only customers with *this specific* product in their
+  wishlist/pre-order," which would need new query logic joining
+  `EmailDigestItem`'s featured products against `WishlistItem`/
+  `OrderItem` — named in the original Sprint 3 brief, still future work.
+- ~~**Scheduled daily digest**~~ (e.g. automatically at 6:00 PM) — the
+  underlying send mechanics are real as of Sprint 6 (`sendDigest()`,
+  §2.22.2) and a cron route already exists and runs regularly
+  (§2.22.6), but nothing calls `sendDigest()` from the cron route today
+  — "Send Update" is still an explicit admin click. Explicitly named as
+  *not* to build in the Sprint 6 brief's own "Future Compatibility"
+  list; see §16.
 
 ---
 
@@ -2368,10 +2638,11 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
     (wishlist count vs. order count per product — the exact numbers the
     Analytics Dashboard's High Interest Products already computes, §2.19)
     rather than needing a new stored field.
-  - *Email Analytics*: open opens/clicks tracking would need new columns on
-    a sent email/recipient record — `EmailDigest`'s `status` already has an
-    unused `"sent"` value reserved for exactly this kind of future
-    per-send tracking (§4.7b).
+  - *Email Analytics*: open/click tracking would need new columns on a
+    sent email/recipient record — **Sprint 6's `EmailLog`** (§4.7g) is
+    exactly that per-send record, already storing recipient/template/
+    status/provider/timestamp; open/click tracking would add
+    `openedAt`/`clickedAt` columns to it rather than needing a new table.
   - *Multiple Events*: unchanged from the Sprint 2 note already on file —
     a future `Event` model could sit between `Product` and everything else
     without reshaping `ProductVariant`/`WishlistItem`/`OrderItem`, none of
@@ -2428,6 +2699,27 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
     instead of system-generated; that table's existence as a precedent
     for "small, `PreOrder`-scoped, append-only" data is exactly what this
     would extend.
+- **Named directly in the Sprint 6 brief's "Future Compatibility"
+  section, explicitly not built this sprint**:
+  - *Scheduled Digest* — the cron route (§2.22.6) already runs on a
+    regular schedule; a future "digest schedule" setting would just add
+    a call to `sendDigest()` there once eligibility conditions are met,
+    reusing the exact same function the admin's manual click already
+    calls. No architectural change needed, only new trigger logic.
+  - *Product-specific Notifications* ("notify me when this exact product
+    is back in stock/price-drops") — would be a new join table between
+    `PreOrder`/`WishlistItem` and `Product` (a "watch" row), separate
+    from the three site-wide preference booleans on `PreOrder` today
+    (§2.21) which are necessarily broad, not per-product.
+  - *Wholesale Emails* — would need a new recipient concept alongside
+    `PreOrder` (a wholesale contact isn't a pre-order), most likely
+    paired with the Wholesale Portal idea already noted above (Sprint
+    3.5's Future Compatibility) rather than extending `PreOrder` itself.
+  - *Multi-event Communication* — `SiteSettings.reminderBatchSentAt`
+    (§4.4) is a singleton guard for exactly one event's countdown, matching
+    this app's existing single-event scope; a future multi-event feature
+    (§16's Sprint 2/3.5 notes on an `Event` model) would move this guard
+    onto a per-event row instead.
 
 ---
 
@@ -2462,12 +2754,12 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
   `PreOrder`) instead of `localStorage`. The opposite is **local mode**
   (§2.3).
 - **`editToken`**: a random, unique, never-rotated token generated once per
-  `PreOrder` at submission time (§4.7). Serves three purposes today: the
-  value stored in the `shokakko_preorder_token` cookie (linking a browser
-  to its order for wishlist purposes), the `{token}` in the future
-  `/edit/{token}` URL shown on the order confirmation page (§2.5) — that
-  route itself doesn't exist yet (§15) — and, new in Sprint 3, the
-  `{token}` in every email's `/unsubscribe/{token}` Footer link (§2.16.4).
+  `PreOrder` at submission time (§4.7). Serves three purposes: the value
+  stored in the `shokakko_preorder_token` cookie (linking a browser to
+  its order for wishlist purposes), the `{token}` in the `/edit/{token}`
+  Self-Service Portal URL (real as of Sprint 5, §2.21), and, new in
+  Sprint 3, the `{token}` in every email's `/unsubscribe/{token}` Footer
+  link (§2.16.4).
 - **Email Design System**: the 8 independent, reusable components
   (Header, Hero Banner, Greeting, Karen's Notes, Collection Card, Product
   Card, CTA Button, Footer) every email template is composed from
@@ -2478,12 +2770,22 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
   **Generate Email** (§2.16.3).
 - **Digest** / **`EmailDigest`**: one prepared Update Email — its section
   toggles, Karen's Notes, picked Collections/Recommended Products,
-  computed New Products/Price Updates, recipient list, and saved rendered
-  HTML, all as one database row (§4.7b).
+  computed New Products/Price Updates/Sold Out, recipient list, and saved
+  rendered HTML, all as one database row (§4.7b). `status` moves
+  `"draft"` → `"generated"` → `"sent"`; only the last is immutable
+  history (§2.22.2).
 - **`EmailService`**: the swappable send interface
-  (`src/lib/email/types.ts`) every future email provider will implement —
-  same role as `StorageAdapter`. Its only implementation this sprint is a
-  no-op that logs instead of sending (§2.16.4).
+  (`src/lib/email/types.ts`) every email provider implements — same role
+  as `StorageAdapter`. Two implementations exist: `consoleEmailService`
+  (a no-op that logs, the local-dev default) and, new in Sprint 6,
+  `resendEmailService` (§2.22.1), a real send through the Resend API.
+- **Email Queue**: the `EmailLog`-backed enqueue-then-process pattern
+  (`src/lib/email/queue.ts`, §2.22.1) every real send goes through —
+  new in Sprint 6.
+- **`EmailLog`**: one row per attempted email send — recipient, subject,
+  rendered HTML, template, status (`pending`/`sending`/`sent`/`failed`),
+  provider, and error message (§4.7g). Backs Email Logs (§2.22.4) and the
+  Notification Dashboard (§2.22.5). New in Sprint 6.
 - **Variant** / **Variant group**: a product's single optional group of
   pill-selectable options (e.g. "Design" → Cat/Bear/Rabbit), each its own
   `ProductVariant` row with an optional SKU, price override, and image
@@ -2534,5 +2836,5 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
 - **Notification preferences**: the three customer-managed booleans on
   `PreOrder` (new products, price updates, 24-hour close reminder) —
   editable from the Self-Service Portal, saved instantly per toggle.
-  Stored, not yet consumed by anything (§15/§16) — a deliberate,
-  documented scope boundary, not an oversight.
+  Real as of Sprint 6 (§2.22.3, §2.22.6): the first two personalize a
+  digest send, the third gates the automatic Reminder Email.

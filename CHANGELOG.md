@@ -2,6 +2,96 @@
 
 Notable changes to the Shokakko Australia pre-order site, newest first.
 
+## Sprint 6 — Communication Platform (2026-08-20)
+
+Connects the Email Architecture (Sprint 3), the Self-Service Portal
+(Sprint 5), and the Notification Centre (Sprint 3) into one real
+communication platform. This is the first sprint that actually sends
+email — every prior sprint built the templates, the admin authoring
+experience, and the interface, but nothing ever left the server.
+Provider-independent by design: nothing built this sprint hard-codes the
+app to Resend specifically.
+
+### Added
+
+- **A real `EmailService` driver** — `resendEmailService`
+  (`src/lib/email/resend.ts`), sending through the Resend API, selected
+  via `EMAIL_DRIVER=resend`. Local dev is unaffected (still defaults to
+  the console driver). Swapping to a different provider later (SES,
+  Brevo, SMTP) is the same shape again: one new file, one new case in
+  the driver selector, no call-site changes.
+- **An Email Queue** (`src/lib/email/queue.ts`, backed by a new
+  `EmailLog` table) — every real send now goes through
+  Queue → Worker → Resend instead of calling the provider directly.
+  Tracks `pending` → `sending` → `sent`/`failed`, the provider's message
+  id, and the real error message on failure.
+- **Automatic Confirmation Email** — fires on every successful checkout,
+  best-effort (never blocks the order). Customer name, order number,
+  event name, itemized order summary, an Edit My Pre-order button (the
+  secure token itself is never shown as text), contact info, footer.
+- **A real "Retrieve My Pre-order"** — `requestEditLink` now actually
+  sends the Edit Link Email instead of logging to console. The
+  privacy-preserving behavior (identical message whether or not an
+  order exists) is unchanged.
+- **Automatic Reminder Email** — fires 24 hours before the event
+  countdown closes, via a new cron route
+  (`src/app/api/cron/emails/route.ts`, this project's first API route)
+  on an hourly Vercel Cron schedule. Event name, countdown, an Edit My
+  Pre-order button, contact info. Respects each customer's own "Remind
+  me 24 hours before preorder closes" preference.
+- **A real "Send Update"** — the Notification Centre's Send Update
+  button now actually sends, personalizing each recipient's copy
+  against their own New Products/Price Updates notification
+  preferences, and skipping a recipient entirely if nothing would show
+  them anything. Only one email goes out per customer.
+- **A new "Sold Out" section** on the Update Email — automatically
+  computed (mirrors how New Products/Price Updates already work), with
+  its own admin toggle.
+- **Email Logs** (`/admin/emails/logs`) — every attempted send, any
+  status, with recipient/template/status/sent time/provider/error, and
+  a Retry button on failed rows.
+- **Notification Dashboard** (`/admin/emails/dashboard`) — Emails Sent
+  Today / Pending / Failed tiles, Daily Digest History, Reminder
+  History.
+- **A stuck-email sweep** — the same cron route retries any queued email
+  stuck `pending`/`sending` for more than 10 minutes, so a crash
+  mid-request or a provider outage doesn't silently lose a send.
+
+### Scope note
+
+Confirmed with you before building: for Sprint 6, implement Resend
+specifically, behind the existing swappable `EmailService` interface —
+no other provider needed this sprint. "Mark as published" (advancing
+`Product.lastNotifiedPriceCents`/the new `lastNotifiedStatus`/`isNew`)
+moved from Generate Email time to actual Send time, since there's now a
+real send to hang it off — Generate can be re-clicked freely without
+consuming the diff it's only meant to preview. Karen's Notes/
+Collections/Karen's Picks/Sold Out are not gated by any customer
+preference — every non-unsubscribed recipient the admin included sees
+those regardless; only New Products, Price Updates, and the Reminder are
+preference-gated, matching exactly the three toggles Sprint 5 already
+built. Scheduled Digest, Product-specific Notifications, Wholesale
+Emails, and Multi-event Communication were named explicitly as future
+work, not built — see the PRD's Future Ideas.
+
+### Fixed (found during this sprint's own verification)
+
+- **The Sold Out candidates query silently excluded every
+  never-notified product** — `lastNotifiedStatus: { not: "sold_out" }`
+  alone never matches a `NULL` column in SQL (most products start with
+  `lastNotifiedStatus: null`), so a freshly sold-out product never
+  showed up as a candidate. Fixed with an explicit `OR` covering both
+  "never notified" and "notified for a different status."
+- **The Reminder Email batch guard compared the wrong two timestamps**
+  — an early version checked `reminderBatchSentAt >= countdownTargetAt`,
+  which is only true once the countdown itself has already passed,
+  meaning the batch would re-send on every cron run right up until the
+  event closed. Fixed to a simple `reminderBatchSentAt != null` check,
+  with the admin Settings action resetting it back to `null` whenever
+  `countdownTargetAt` itself changes — verified idempotent across
+  repeated cron hits, and re-armed correctly after changing the
+  countdown.
+
 ## Sprint 5 — Customer Self-Service Portal (2026-08-20)
 
 Closes the loop every prior sprint deferred: since Sprint 2, every order

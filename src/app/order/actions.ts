@@ -8,6 +8,9 @@ import { getNextOrderNumber } from "@/lib/order-number";
 import { PREORDER_TOKEN_COOKIE, PREORDER_TOKEN_TTL_SECONDS } from "@/lib/wishlist";
 import { orderFormSchema } from "@/lib/validations/order";
 import { flattenZodError } from "@/lib/validations/utils";
+import { sendTrackedEmail } from "@/lib/email/queue";
+import { buildConfirmationEmailData } from "@/lib/email/data/confirmation";
+import { renderConfirmationEmail } from "@/lib/email/render";
 
 export type OrderSubmitState = {
   error?: string;
@@ -232,6 +235,25 @@ export async function submitPreOrder(
   // as the ActivityLog one above, just scoped to this one order.
   await db.orderHistoryEntry
     .create({ data: { preOrderId: order.id, type: "order_created", message: "Order created" } })
+    .catch(() => {});
+
+  // Sprint 6, Part 2 — automatic Confirmation Email. Best-effort, same
+  // pattern as the two inserts above: a Resend outage must never break
+  // checkout. The attempt is still recorded (and visible for retry) in
+  // Email Logs via sendTrackedEmail, even on failure.
+  await buildConfirmationEmailData(order.orderNumber)
+    .then((data) => {
+      if (!data) return;
+      return renderConfirmationEmail(data).then((html) =>
+        sendTrackedEmail({
+          to: order.customerEmail,
+          subject: data.subject,
+          html,
+          template: "confirmation",
+          preOrderId: order.id,
+        }),
+      );
+    })
     .catch(() => {});
 
   // Links this browser to the order's wishlist going forward — the root

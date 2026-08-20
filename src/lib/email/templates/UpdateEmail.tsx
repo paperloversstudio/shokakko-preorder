@@ -45,6 +45,7 @@ export function UpdateEmail({ data }: { data: UpdateEmailData }) {
   const showRecommended = data.showRecommended && data.recommendedProducts.length > 0;
   const showNewProducts = data.showNewProducts && data.newProducts.length > 0;
   const showPriceUpdates = data.showPriceUpdates && data.priceUpdateProducts.length > 0;
+  const showSoldOut = data.showSoldOut && data.soldOutProducts.length > 0;
 
   return (
     <EmailLayout title={data.subject}>
@@ -91,6 +92,17 @@ export function UpdateEmail({ data }: { data: UpdateEmailData }) {
           <SectionHeading>💸 Price Updates</SectionHeading>
           <ResponsiveCardGrid>
             {data.priceUpdateProducts.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </ResponsiveCardGrid>
+        </>
+      )}
+
+      {showSoldOut && (
+        <>
+          <SectionHeading>🔴 Sold Out</SectionHeading>
+          <ResponsiveCardGrid>
+            {data.soldOutProducts.map((product) => (
               <ProductCard key={product.id} product={product} />
             ))}
           </ResponsiveCardGrid>

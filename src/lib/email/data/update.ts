@@ -84,6 +84,30 @@ export async function computePriceUpdateCandidates(): Promise<
   );
 }
 
+/** Sprint 6 — live "Sold Out" candidates, same checkpoint pattern as Price
+ * Updates: sold-out products not yet flagged as notified via
+ * `lastNotifiedStatus`. Used by both the Notification Centre's live
+ * preview and Generate Email's snapshot step.
+ *
+ * `lastNotifiedStatus: { not: "sold_out" }` alone would silently exclude
+ * every never-notified product (SQL's `column != X` never matches a NULL
+ * column, and most products start with `lastNotifiedStatus: null`) — the
+ * explicit OR below covers both "never notified" and "notified, but for
+ * a status other than sold_out" (a product can only ever advance this
+ * field to "sold_out" itself, but being explicit here avoids relying on
+ * that invariant holding forever). */
+export async function computeSoldOutCandidates(): Promise<ProductCardData[]> {
+  const products = await db.product.findMany({
+    where: {
+      status: "sold_out",
+      OR: [{ lastNotifiedStatus: null }, { lastNotifiedStatus: { not: "sold_out" } }],
+    },
+    orderBy: { sortOrder: "asc" },
+    select: productSelect,
+  });
+  return Promise.all(products.map((p) => toProductCardData(p)));
+}
+
 export type UpdateEmailData = {
   subject: string;
   firstName: string;
@@ -101,6 +125,8 @@ export type UpdateEmailData = {
   showNewProducts: boolean;
   priceUpdateProducts: ProductCardData[];
   showPriceUpdates: boolean;
+  soldOutProducts: ProductCardData[];
+  showSoldOut: boolean;
   ctaText: string;
   ctaUrl: string;
   footerLinks: FooterLinks;
@@ -114,6 +140,7 @@ type DigestRow = {
   showRecommended: boolean;
   showNewProducts: boolean;
   showPriceUpdates: boolean;
+  showSoldOut: boolean;
   ctaText: string;
   ctaUrl: string;
   collections: { id: string; name: string; imageUrl: string | null }[];
@@ -139,6 +166,7 @@ export async function buildUpdateEmailData(
   digest: DigestRow,
   newProducts: ProductCardData[],
   priceUpdateProducts: ProductCardData[],
+  soldOutProducts: ProductCardData[] = [],
   firstName = "there",
 ): Promise<UpdateEmailData> {
   const settings = await db.siteSettings.findUnique({ where: { id: "singleton" } });
@@ -160,6 +188,8 @@ export async function buildUpdateEmailData(
     showNewProducts: digest.showNewProducts,
     priceUpdateProducts,
     showPriceUpdates: digest.showPriceUpdates,
+    soldOutProducts,
+    showSoldOut: digest.showSoldOut,
     ctaText: digest.ctaText,
     ctaUrl: digest.ctaUrl,
     // Not tied to any one recipient (a digest goes to many customers), so

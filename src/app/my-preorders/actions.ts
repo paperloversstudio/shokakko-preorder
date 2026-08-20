@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { emailService } from "@/lib/email";
+import { sendTrackedEmail } from "@/lib/email/queue";
 import { buildEditLinkEmailData } from "@/lib/email/data/edit-link";
 import { renderEditLinkEmail } from "@/lib/email/render";
 import { requestEditLinkSchema } from "@/lib/validations/edit-link";
@@ -36,7 +36,7 @@ export async function requestEditLink(
   const order = await db.preOrder.findFirst({
     where: { customerEmail: parsed.data.email },
     orderBy: { createdAt: "desc" },
-    select: { customerFirstName: true, customerEmail: true, editToken: true },
+    select: { id: true, customerFirstName: true, customerEmail: true, editToken: true },
   });
 
   if (order) {
@@ -51,6 +51,7 @@ export async function requestEditLink(
 }
 
 async function sendEditLinkEmail(order: {
+  id: string;
   customerFirstName: string;
   customerEmail: string;
   editToken: string | null;
@@ -58,5 +59,11 @@ async function sendEditLinkEmail(order: {
   const data = await buildEditLinkEmailData(order);
   if (!data) return; // no editToken — pre-Sprint-2 order, nothing to link to
   const html = await renderEditLinkEmail(data);
-  await emailService.send({ to: order.customerEmail, subject: data.subject, html });
+  await sendTrackedEmail({
+    to: order.customerEmail,
+    subject: data.subject,
+    html,
+    template: "edit_link",
+    preOrderId: order.id,
+  });
 }

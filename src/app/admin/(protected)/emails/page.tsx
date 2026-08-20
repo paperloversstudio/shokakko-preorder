@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import {
   computeNewProductCandidates,
   computePriceUpdateCandidates,
+  computeSoldOutCandidates,
   buildUpdateEmailData,
 } from "@/lib/email/data/update";
 import { renderUpdateEmail } from "@/lib/email/render";
@@ -12,9 +13,10 @@ import { NotificationCentreForm } from "./NotificationCentreForm";
 export default async function NotificationCentrePage() {
   const draft = await findOrCreateCurrentDraft();
 
-  const [newProducts, priceUpdates, recipientCount, tags, products] = await Promise.all([
+  const [newProducts, priceUpdates, soldOutProducts, recipientCount, tags, products] = await Promise.all([
     computeNewProductCandidates(),
     computePriceUpdateCandidates(),
+    computeSoldOutCandidates(),
     db.preOrder.count({ where: { unsubscribedAt: null } }),
     db.tag.findMany({ orderBy: { name: "asc" } }),
     db.product.findMany({
@@ -34,7 +36,9 @@ export default async function NotificationCentrePage() {
   // saved yet, so the live recompute is the only preview available.
   const previewHtml = draft.renderedHtml
     ? draft.renderedHtml
-    : await renderUpdateEmail(await buildUpdateEmailData(draft, newProducts, priceUpdateProducts));
+    : await renderUpdateEmail(
+        await buildUpdateEmailData(draft, newProducts, priceUpdateProducts, soldOutProducts),
+      );
 
   return (
     <div className="flex flex-col gap-6">
@@ -46,12 +50,26 @@ export default async function NotificationCentrePage() {
             then generate one digest when you&apos;re ready.
           </p>
         </div>
-        <Link
-          href="/admin/emails/history"
-          className="rounded-pill px-3 py-1.5 text-sm font-semibold hover:bg-mint/50"
-        >
-          View history →
-        </Link>
+        <div className="flex flex-wrap items-center gap-1">
+          <Link
+            href="/admin/emails/history"
+            className="rounded-pill px-3 py-1.5 text-sm font-semibold hover:bg-mint/50"
+          >
+            View history →
+          </Link>
+          <Link
+            href="/admin/emails/logs"
+            className="rounded-pill px-3 py-1.5 text-sm font-semibold hover:bg-mint/50"
+          >
+            Email Logs →
+          </Link>
+          <Link
+            href="/admin/emails/dashboard"
+            className="rounded-pill px-3 py-1.5 text-sm font-semibold hover:bg-mint/50"
+          >
+            Dashboard →
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
@@ -65,6 +83,7 @@ export default async function NotificationCentrePage() {
               showRecommended: draft.showRecommended,
               showNewProducts: draft.showNewProducts,
               showPriceUpdates: draft.showPriceUpdates,
+              showSoldOut: draft.showSoldOut,
               ctaText: draft.ctaText,
               ctaUrl: draft.ctaUrl,
               status: draft.status,
@@ -83,6 +102,7 @@ export default async function NotificationCentrePage() {
             }))}
             newProductCount={newProducts.length}
             priceUpdateCount={priceUpdateProducts.length}
+            soldOutCount={soldOutProducts.length}
             recipientCount={recipientCount}
           />
         </div>
@@ -95,8 +115,10 @@ export default async function NotificationCentrePage() {
             {draft.renderedHtml
               ? "Exactly what Generate Email saved — click it again after making changes to refresh this."
               : "Reflects the catalogue right now — click Generate Email to save this as the digest."}{" "}
-            Shown with a placeholder name; each real send will be
-            personalized per recipient (a future sprint).
+            Shown with a placeholder name and every section toggled on — the
+            real send personalizes New Products and Price Updates per
+            recipient&apos;s own notification preferences, so some
+            customers&apos; copies may be shorter than this preview.
           </p>
           <iframe
             title="Update Email preview"

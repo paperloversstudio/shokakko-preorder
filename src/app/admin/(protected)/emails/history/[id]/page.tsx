@@ -19,6 +19,7 @@ export default async function EmailHistoryDetailPage({
 
   const newItems = digest.items.filter((i) => i.kind === "new");
   const priceItems = digest.items.filter((i) => i.kind === "price_update");
+  const soldOutItems = digest.items.filter((i) => i.kind === "sold_out");
 
   return (
     <div className="flex flex-col gap-6">
@@ -57,6 +58,7 @@ export default async function EmailHistoryDetailPage({
             </li>
             <li>New Products: {digest.showNewProducts ? "Shown" : "Hidden"}</li>
             <li>Price Updates: {digest.showPriceUpdates ? "Shown" : "Hidden"}</li>
+            <li>Sold Out: {digest.showSoldOut ? "Shown" : "Hidden"}</li>
           </ul>
 
           {newItems.length > 0 && (
@@ -81,6 +83,17 @@ export default async function EmailHistoryDetailPage({
                     {item.productName} — {formatPrice(item.previousPriceCents)} →{" "}
                     {formatPrice(item.priceCents)}
                   </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {soldOutItems.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold text-ink">Sold Out captured</h3>
+              <ul className="mt-1 text-sm text-ink-soft">
+                {soldOutItems.map((item) => (
+                  <li key={item.id}>{item.productName}</li>
                 ))}
               </ul>
             </div>

@@ -8,6 +8,7 @@ export const emailDigestFormSchema = z.object({
   showRecommended: z.boolean().default(false),
   showNewProducts: z.boolean().default(false),
   showPriceUpdates: z.boolean().default(false),
+  showSoldOut: z.boolean().default(false),
   ctaText: z.string().trim().min(1, "Button text is required").max(60),
   ctaUrl: z.string().trim().min(1, "Button URL is required").max(500),
 });

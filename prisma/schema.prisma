@@ -42,6 +42,14 @@ model Product {
   // Null = no baseline yet (pre-Sprint-3 products), so nothing is ever
   // flagged as "changed" until a first baseline exists.
   lastNotifiedPriceCents Int?
+  // Sprint 6 — same checkpoint pattern as lastNotifiedPriceCents above,
+  // but for the Update Email's "Sold Out" section: set to "sold_out" once
+  // a digest that included this product as sold-out is actually sent, so
+  // it isn't re-included next time. Cleared back to null any time the
+  // product's status is saved as anything other than "sold_out" (see the
+  // product update action), so a restock-then-sell-out cycle is detected
+  // as a fresh candidate again.
+  lastNotifiedStatus     String?
   // Sprint 3.5 — one optional variant group per product (e.g. "Design",
   // "Colour", "Size"). Null = this product has no variants; free text,
   // same pattern as `type`/`brand`, no fixed list. When set, `variants`
@@ -69,25 +77,25 @@ model Product {
 // product), not a separate VariantGroup model — matches the brief's
 // "Current requirement: Support ONE Variant Group per product."
 model ProductVariant {
-  id        String  @id @default(cuid())
-  productId String
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id                 String   @id @default(cuid())
+  productId          String
+  product            Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   // "Cat", "Bear", "Rabbit", ...
-  name      String
+  name               String
   // Optional; unique when set — nullable-unique is fine on SQLite (every
   // NULL is treated as distinct), same precedent as PreOrder.editToken.
-  sku       String? @unique
+  sku                String?  @unique
   // Null = use the parent Product's own priceCents.
   priceCentsOverride Int?
   // One image per variant (no gallery) — swaps in as the main product
   // photo on selection; falls back to the product's own gallery when null.
-  imageUrl  String?
+  imageUrl           String?
   // Admin-controlled pill display order.
-  sortOrder Int     @default(0)
+  sortOrder          Int      @default(0)
   // Purchase Dashboard checklist status for this specific variant — see
   // Product.purchaseStatus above for the no-variant equivalent.
-  purchaseStatus String @default("not_purchased")
-  createdAt DateTime @default(now())
+  purchaseStatus     String   @default("not_purchased")
+  createdAt          DateTime @default(now())
 
   orderItems    OrderItem[]
   wishlistItems WishlistItem[]
@@ -162,6 +170,12 @@ model SiteSettings {
   emailShippingPolicyUrl String?
   emailWebsiteUrl        String?
   emailInstagramUrl      String?
+  // Sprint 6 — guards the automatic 24h-before-close Reminder Email batch
+  // (site-wide, since countdownTargetAt above is one single event) against
+  // sending twice for the same countdown. Null = not sent yet for the
+  // current countdownTargetAt. A future multi-event feature would move
+  // this onto a per-event row instead of this singleton settings table.
+  reminderBatchSentAt    DateTime?
   updatedAt              DateTime  @updatedAt
 }
 
@@ -174,9 +188,9 @@ model OrderSequence {
 }
 
 model PreOrder {
-  id                String    @id @default(cuid())
+  id                String @id @default(cuid())
   // Human-friendly reference shown to the customer, e.g. "SHK-000123".
-  orderNumber       String    @unique
+  orderNumber       String @unique
   customerFirstName String
   customerLastName  String
   customerEmail     String
@@ -192,7 +206,7 @@ model PreOrder {
   shippingSuburb   String
   shippingState    String
   shippingPostcode String
-  shippingCountry  String @default("Australia")
+  shippingCountry  String  @default("Australia")
 
   // Same shape as shipping, but every field is nullable — null across the
   // board means "same as shipping" (the checkout form's default), set only
@@ -234,8 +248,9 @@ model PreOrder {
 
   items           OrderItem[]
   wishlistItems   WishlistItem[]
-  receivedDigests EmailDigest[]  @relation("DigestRecipients")
+  receivedDigests EmailDigest[]       @relation("DigestRecipients")
   historyEntries  OrderHistoryEntry[]
+  emailLogs       EmailLog[]
 }
 
 // Sprint 5 — one row per meaningful change to a PreOrder after it's
@@ -253,10 +268,10 @@ model OrderHistoryEntry {
   // "variant_changed" | "quantity_changed" | "shipping_address_updated" |
   // "billing_address_updated" | "customer_info_updated" |
   // "notification_preferences_updated"
-  type      String
+  type       String
   // Short, human-readable line, e.g. "Bear Notebook removed".
-  message   String
-  createdAt DateTime @default(now())
+  message    String
+  createdAt  DateTime @default(now())
 }
 
 // A customer's wishlist, once it's durable (see WishlistContext.tsx's
@@ -266,18 +281,18 @@ model OrderHistoryEntry {
 // price/status, so it's a plain reference to the current Product row, and
 // disappears (cascades) if that product is ever deleted.
 model WishlistItem {
-  id         String   @id @default(cuid())
+  id         String          @id @default(cuid())
   preOrderId String
-  preOrder   PreOrder @relation(fields: [preOrderId], references: [id], onDelete: Cascade)
+  preOrder   PreOrder        @relation(fields: [preOrderId], references: [id], onDelete: Cascade)
   productId  String
-  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   // Sprint 3.5 — which variant was wishlisted, if the product has any.
   // Still a live reference (not a snapshot, same reasoning as productId
   // above) — SetNull, not Cascade, so deleting just the variant leaves
   // the wishlist item pointing at the base product rather than vanishing.
   variantId  String?
   variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
-  addedAt    DateTime @default(now())
+  addedAt    DateTime        @default(now())
 
   // Includes variantId so two different variants of the same product can
   // both be wishlisted at once (each is its own row) — the toggle Server
@@ -288,14 +303,14 @@ model WishlistItem {
 }
 
 model OrderItem {
-  id         String   @id @default(cuid())
+  id         String          @id @default(cuid())
   preOrderId String
-  preOrder   PreOrder @relation(fields: [preOrderId], references: [id], onDelete: Cascade)
+  preOrder   PreOrder        @relation(fields: [preOrderId], references: [id], onDelete: Cascade)
   // Nullable + SetNull: the product can be edited or deleted later without
   // touching past orders — productName/productBrand/productSku/unitPriceCents
   // below are the permanent record of what was actually ordered.
   productId  String?
-  product    Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  product    Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
   // Sprint 3.5 — which variant was ordered, if the product has any.
   // Nullable + SetNull, same reasoning as productId above.
   variantId  String?
@@ -334,6 +349,9 @@ model EmailDigest {
   showRecommended  Boolean   @default(false)
   showNewProducts  Boolean   @default(false)
   showPriceUpdates Boolean   @default(false)
+  // Sprint 6 — same automatic-computation pattern as showNewProducts/
+  // showPriceUpdates above (not admin-picked); see Product.lastNotifiedStatus.
+  showSoldOut      Boolean   @default(false)
   ctaText          String    @default("View New Products")
   ctaUrl           String    @default("/")
   // Saved by "Generate Email" — one representative preview render (a
@@ -353,6 +371,7 @@ model EmailDigest {
   // every PreOrder with unsubscribedAt: null as of that moment.
   recipients          PreOrder[]        @relation("DigestRecipients")
   items               EmailDigestItem[]
+  emailLogs           EmailLog[]
 }
 
 // New Products / Price Updates are computed automatically (not
@@ -366,10 +385,47 @@ model EmailDigestItem {
   digest             EmailDigest @relation(fields: [digestId], references: [id], onDelete: Cascade)
   productId          String?
   product            Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
-  kind               String // "new" | "price_update"
+  kind               String // "new" | "price_update" | "sold_out"
   productName        String
   priceCents         Int?
   previousPriceCents Int? // only set for kind = "price_update"
+}
+
+// --- Communication Platform (Sprint 6) ---
+//
+// Every real email send goes through here first — "queue" and "worker"
+// are two functions (enqueueEmail / processEmailLog in
+// src/lib/email/queue.ts) rather than separate infrastructure, since this
+// app's volume is exhibition-scale, not high-volume. This is also what
+// makes every send show up in the admin Email Logs / Notification
+// Dashboard automatically, with no per-call-site logging code.
+model EmailLog {
+  id                String       @id @default(cuid())
+  to                String
+  subject           String
+  html              String
+  // "confirmation" | "edit_link" | "reminder" | "digest"
+  template          String
+  // "pending" | "sending" | "sent" | "failed"
+  status            String       @default("pending")
+  // "resend" | "console" — whichever EmailService driver actually handled
+  // (or attempted) this send.
+  provider          String?
+  providerMessageId String?
+  errorMessage      String?
+  attempts          Int          @default(0)
+  // Nullable + SetNull, same reasoning as OrderItem.productId — a log row
+  // is a permanent record and must survive its PreOrder/EmailDigest being
+  // deleted later.
+  preOrderId        String?
+  preOrder          PreOrder?    @relation(fields: [preOrderId], references: [id], onDelete: SetNull)
+  digestId          String?
+  digest            EmailDigest? @relation(fields: [digestId], references: [id], onDelete: SetNull)
+  createdAt         DateTime     @default(now())
+  sentAt            DateTime?
+
+  @@index([status])
+  @@index([template, sentAt])
 }
 
 // --- Purchase & Analytics Dashboards (Sprint 3.5) ---

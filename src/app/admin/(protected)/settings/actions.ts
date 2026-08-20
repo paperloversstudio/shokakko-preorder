@@ -77,6 +77,12 @@ export async function updateSiteSettings(
   const countdownTargetAt = values.countdownTargetAt
     ? new Date(values.countdownTargetAt)
     : null;
+  // Sprint 6 — changing the countdown re-arms the Reminder Email batch
+  // guard (see SiteSettings.reminderBatchSentAt's comment): a newly-set
+  // or moved target hasn't had its reminder sent yet, so the cron route
+  // (src/app/api/cron/emails/route.ts) should be free to send again.
+  const countdownChanged =
+    (existing?.countdownTargetAt?.getTime() ?? null) !== (countdownTargetAt?.getTime() ?? null);
   // Tiptap's canonical "empty" output is "<p></p>", not "" — treat both as
   // "no content" so an untouched editor doesn't render a blank paragraph.
   const preorderInfoHtml =
@@ -101,6 +107,7 @@ export async function updateSiteSettings(
       eventLocation: values.eventLocation || null,
       eventInfo: values.eventInfo || null,
       countdownTargetAt,
+      ...(countdownChanged ? { reminderBatchSentAt: null } : {}),
       preorderInfoHtml,
       ...emailFields,
     },

@@ -24,10 +24,14 @@ export default async function EmailHistoryPage() {
         </Link>
         <h1 className="mt-1 font-display text-2xl font-bold">Email History</h1>
         <p className="text-sm text-ink-soft">
-          Every Update Email ever generated. Since real sending isn&apos;t
-          wired up yet (a future sprint), you&apos;ll see one entry that
-          keeps updating each time you click &quot;Generate Email&quot; —
-          future sends will each get their own row here.
+          Every Update Email ever generated. One entry keeps updating each
+          time you click &quot;Generate Email&quot; until you click
+          &quot;Send Update&quot; — a sent digest becomes immutable history
+          and the next Generate starts a fresh row. See{" "}
+          <Link href="/admin/emails/logs" className="underline hover:text-ink">
+            Email Logs
+          </Link>{" "}
+          for the individual per-recipient sends behind each one.
         </p>
       </div>
 

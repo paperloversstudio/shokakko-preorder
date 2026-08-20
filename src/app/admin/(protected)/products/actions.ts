@@ -439,6 +439,13 @@ export async function updateProduct(
           // the Price Updates baseline, and only advances when a price
           // change is captured by "Generate Email" (see
           // src/lib/email/data/update.ts), not on every ordinary edit.
+          // lastNotifiedStatus (Sprint 6) — the Sold Out checkpoint. Only
+          // ever cleared here, on leaving "sold_out"; it's advanced to
+          // "sold_out" by sendDigest() once a digest that included this
+          // product as sold-out is actually sent. Clearing it whenever the
+          // product isn't sold_out means a future restock-then-sell-out
+          // cycle is picked up as a fresh candidate again.
+          lastNotifiedStatus: values.status === "sold_out" ? undefined : null,
           tags: { set: tagIds },
         },
       }),
