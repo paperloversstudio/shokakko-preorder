@@ -26,10 +26,8 @@ export default async function OrderConfirmationPage({
 
   if (!order) notFound();
 
-  // The future Pre-order Workspace page (/edit/[token]) isn't built yet —
-  // this sprint only generates and stores the token. Shown as inert text
-  // (not a clickable link) so visiting it today doesn't lead to a
-  // confusing 404 — see docs/PRD.md and CHANGELOG.md for the full context.
+  // Sprint 5 — /edit/[token] (the Self-Service Portal) now exists, so this
+  // is a real, clickable link (was inert text through Sprint 4).
   let editUrl: string | null = null;
   if (order.editToken) {
     const headersList = await headers();
@@ -71,14 +69,19 @@ export default async function OrderConfirmationPage({
           <div className="rounded-card bg-white p-6 shadow-sm shadow-ink/5 sm:p-8">
             <h2 className="mb-2 font-display font-bold">Edit My Pre-order</h2>
             <p className="mb-3 text-sm text-ink-soft">
-              Email functionality will be implemented in a future sprint.
-              For now, please bookmark this page if you would like to edit
-              your pre-order later.
+              Bookmark this link, or request it again anytime from{" "}
+              <Link href="/my-preorders" className="font-semibold text-blue hover:underline">
+                My Pre-order
+              </Link>{" "}
+              using {order.customerEmail}.
             </p>
             <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-mint/30 p-3">
-              <code className="min-w-0 flex-1 break-all text-xs text-ink-soft">
+              <a
+                href={editUrl}
+                className="min-w-0 flex-1 break-all text-xs font-semibold text-blue hover:underline"
+              >
                 {editUrl}
-              </code>
+              </a>
               <CopyLinkButton text={editUrl} />
             </div>
           </div>

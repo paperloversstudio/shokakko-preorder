@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { formatPrice } from "@/lib/validations/product";
 import { formatAddress, formatCustomerName, SHIPPING_METHOD_LABELS } from "@/lib/validations/order";
+import { ORDER_HISTORY_TYPE_LABELS, type OrderHistoryType } from "@/lib/validations/order-history";
 import { StatusSelect } from "../StatusSelect";
 
 export default async function AdminPreOrderDetailPage({
@@ -11,7 +12,7 @@ export default async function AdminPreOrderDetailPage({
   const { id } = await params;
   const order = await db.preOrder.findUnique({
     where: { id },
-    include: { items: true },
+    include: { items: true, historyEntries: { orderBy: { createdAt: "desc" } } },
   });
 
   if (!order) notFound();
@@ -125,6 +126,31 @@ export default async function AdminPreOrderDetailPage({
             </p>
           </div>
         </div>
+      </div>
+
+      <div className="rounded-card bg-white p-5 shadow-sm shadow-ink/5">
+        <h2 className="mb-3 font-display font-bold">Order History</h2>
+        {order.historyEntries.length === 0 ? (
+          <p className="text-sm text-ink-soft">No changes recorded yet.</p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-line">
+            {order.historyEntries.map((entry) => (
+              <li key={entry.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                <div>
+                  <p className="font-semibold">
+                    {ORDER_HISTORY_TYPE_LABELS[entry.type as OrderHistoryType] ?? entry.type}
+                  </p>
+                  <p className="text-ink-soft">{entry.message}</p>
+                </div>
+                <p className="shrink-0 text-xs text-ink-soft">
+                  {entry.createdAt.toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+                  {" · "}
+                  {entry.createdAt.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

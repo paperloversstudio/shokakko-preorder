@@ -227,6 +227,13 @@ export async function submitPreOrder(
     })
     .catch(() => {});
 
+  // Sprint 5 — the Self-Service Portal's Order Timeline needs a real
+  // "Order Created" entry from day one; same best-effort insert pattern
+  // as the ActivityLog one above, just scoped to this one order.
+  await db.orderHistoryEntry
+    .create({ data: { preOrderId: order.id, type: "order_created", message: "Order created" } })
+    .catch(() => {});
+
   // Links this browser to the order's wishlist going forward — the root
   // layout reads this on every request from here on (see src/app/layout.tsx
   // and WishlistContext.tsx's local/linked modes).

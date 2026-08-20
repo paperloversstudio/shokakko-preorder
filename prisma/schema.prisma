@@ -222,9 +222,41 @@ model PreOrder {
   // list. Null = still subscribed.
   unsubscribedAt DateTime?
 
+  // Sprint 5 — customer-managed notification preferences, editable from
+  // the Self-Service Portal (/edit/[editToken]). Stored and saveable now;
+  // NOT yet consumed by EmailDigest recipient targeting, which is still a
+  // broadcast to every non-unsubscribed PreOrder (see EmailDigest's own
+  // comment) — wiring these into actual send-targeting is future work
+  // this schema is ready for, not built this sprint.
+  notifyNewProducts         Boolean @default(true)
+  notifyPriceUpdates        Boolean @default(true)
+  notifyReminderBeforeClose Boolean @default(true)
+
   items           OrderItem[]
   wishlistItems   WishlistItem[]
   receivedDigests EmailDigest[]  @relation("DigestRecipients")
+  historyEntries  OrderHistoryEntry[]
+}
+
+// Sprint 5 — one row per meaningful change to a PreOrder after it's
+// created, feeding both the customer-facing Order Timeline (Self-Service
+// Portal, collapsed to "Order Created" / "Updated" x N / "Current
+// Version") and the admin-facing Order History (full type/date/time per
+// row). Same "small generic feed, not a full audit log" shape and
+// reasoning as Sprint 3.5's ActivityLog, just scoped to one order instead
+// of being a site-wide feed.
+model OrderHistoryEntry {
+  id         String   @id @default(cuid())
+  preOrderId String
+  preOrder   PreOrder @relation(fields: [preOrderId], references: [id], onDelete: Cascade)
+  // "order_created" | "product_added" | "product_removed" |
+  // "variant_changed" | "quantity_changed" | "shipping_address_updated" |
+  // "billing_address_updated" | "customer_info_updated" |
+  // "notification_preferences_updated"
+  type      String
+  // Short, human-readable line, e.g. "Bear Notebook removed".
+  message   String
+  createdAt DateTime @default(now())
 }
 
 // A customer's wishlist, once it's durable (see WishlistContext.tsx's

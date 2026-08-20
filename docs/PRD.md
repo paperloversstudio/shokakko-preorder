@@ -37,6 +37,18 @@ catch-all route that serves any admin-created page automatically, two
 new homepage nav pills, and two new footer links. **This sprint does not
 modify any existing pre-order/checkout/product/variant/purchase/
 analytics functionality** — every touch to existing files is additive.
+**8.0** (Sprint 5 — Customer Self-Service Portal): closes the loop every
+prior sprint deferred — a customer can now request their secure edit link
+by email (§2.6, never revealing whether an address has an order) and
+land on a complete self-service portal at `/edit/{token}` (§2.21): change
+a variant/quantity, remove an item, manage their wishlist (including
+moving items into the order), edit their customer/shipping/billing info,
+manage notification preferences, and see a plain-language order timeline
+— entirely passwordless. A new `OrderHistoryEntry` table backs both that
+timeline and a new admin Order History section (§2.11). **No real email
+provider is wired up this sprint either** (confirmed before building) —
+sending still logs to the console, same as every email-shaped feature
+since Sprint 3; see §2.16.4/§15.
 **Scope of this document:** Every claim below is derived from reading the
 actual source code, database schema, and migrations in this repository.
 Nothing here describes a feature that is not already implemented. Where
@@ -309,32 +321,32 @@ identical side panel as every other drawer from the `sm` breakpoint up.
 Unchanged in behavior from before Sprint 1 (still public, still `noindex`,
 still shows the itemized order/addresses) except that it now also mounts
 `ClearCartOnMount` (§2.2), the order number it displays follows the new
-sequential format (§2.7), and — **new in Sprint 2** — if the order has a
-secure `editToken` (§4.7, every order created from this point on has one),
-an "Edit My Pre-order" card renders between the thank-you message and the
-itemized order: the future edit URL (`/edit/{token}`) shown as **inert,
-non-clickable text** (that route doesn't exist yet — a live link would 404
-today), a "Copy Link" button (`CopyLinkButton`, `navigator.clipboard`),
-and a note that email delivery is coming in a future sprint and to
-bookmark this page in the meantime. This is the temporary stand-in for the
-"real" delivery mechanism described in §15 — this page, not email, is
-currently the only place a customer ever sees their edit link.
+sequential format (§2.7), and — **new in Sprint 2, now a real link as of
+Sprint 5** — if the order has a secure `editToken` (§4.7, every order
+created from this point on has one), an "Edit My Pre-order" card renders
+between the thank-you message and the itemized order: the edit URL
+(`/edit/{token}`, §2.21) as an actual clickable link (was inert text
+through Sprint 4, since the page it pointed to didn't exist yet), a "Copy
+Link" button (`CopyLinkButton`, `navigator.clipboard`), and a note that
+the same link can be requested again anytime from My Pre-order (§2.6)
+using the order's email address.
 
-### 2.6 "My Pre-order" placeholder (`/my-preorders`)
+### 2.6 "Retrieve My Pre-order" (`/my-preorders`, real as of Sprint 5)
 
-Still a static page — heading "My Pre-order," a short explanation that this
-feature is coming in a later sprint, and a description of the **intended**
-future design: the customer enters their email address, and if a pre-order
-exists for that address, the system sends a secure "Edit My Pre-order"
-link. **Nothing behind this page is implemented yet** — no form, no email
-lookup, no data access. This project is intentionally accountless; there is
-no plan to add customer login/passwords.
-
-Sprint 2 prepared the *architecture* this page will eventually need
-(§2.5/§4.7 — every order now gets a stored `editToken`) but deliberately
-did not build the `/edit/[token]` page or wire this placeholder up to
-anything — the only place a customer can see their own edit link today is
-the order confirmation page's Success Page card (§2.5), not this page.
+Replaces the Sprint 1–4 placeholder with the real, accountless,
+email-based lookup flow: a single Email Address field and a **"Send Me My
+Edit Link"** button (`RequestEditLinkForm.tsx`, client, `useActionState`).
+On submit, `requestEditLink` (`src/app/my-preorders/actions.ts`) looks up
+the most recent `PreOrder` for that email and — if found — sends the
+Edit Link Email (§2.16.2); regardless of whether an order was found, or
+even whether the send itself succeeded, the page always shows the exact
+same message: **"If a preorder exists for this email address, a secure
+edit link has been sent to your email."** This is a deliberate,
+non-negotiable privacy property — the only thing that varies is a genuine
+input-format error (not a valid email at all), which is normal form
+validation, not an existence leak. See §11 for the one known gap this
+form has (no rate limiting, same unaddressed class of gap as the admin
+login and checkout).
 
 ### 2.7 Sequential order numbers
 
@@ -416,6 +428,16 @@ Unchanged in behavior from before Sprint 1 — `/admin/preorders` (list) and
 `/[id]` (detail), status dropdown (new/confirmed/fulfilled/cancelled). The
 order number displayed now follows the new `PO####` format automatically,
 since both pages simply render `order.orderNumber`.
+
+**New in Sprint 5**: the detail page gains an **Order History** card
+listing every `OrderHistoryEntry` for that order — Action (a human label
+via `ORDER_HISTORY_TYPE_LABELS`), Date, and Time, newest first (matching
+this app's existing newest-first convention for every other admin feed).
+Examples: Order Created, Product Added, Product Removed, Variant Changed,
+Quantity Changed, Shipping/Billing Address Updated, Notification
+Preferences Updated. Same underlying table that drives the customer-
+facing Order Timeline on the Self-Service Portal (§2.21), just shown with
+full detail instead of collapsed to "Updated."
 
 ### 2.12 Image storage (swappable adapter)
 
@@ -596,6 +618,11 @@ trade-off.
   (template-specific, reuses `SiteSettings.countdownTargetAt`, the same
   field the homepage's `EventInfoStrip` already shows), CTA Button,
   Footer. Also a **placeholder layout**.
+- **Edit Link Email** (`EditLinkEmail.tsx`, **new in Sprint 5**) — Header,
+  Greeting, CTA Button (the edit link), Footer. The one template this
+  sprint actually wires to a real trigger — `requestEditLink` (§2.6) —
+  though "wired" still means the console driver, same as every other
+  template (§2.16.4).
 
 Neither Confirmation nor Reminder is wired to an automatic trigger point
 this sprint (no send-on-checkout, no scheduled reminder) — both are only
@@ -685,13 +712,19 @@ render that template against it live. Nothing is persisted.
   product link, collection link, unsubscribe link, footer links) shared
   by every data builder, extracted from the protocol/host-detection logic
   that originally lived inline in the order confirmation page (Sprint 2).
-- **`src/lib/email/first-name.ts`** — `getFirstName()`, since
-  `PreOrder.customerName` only ever stores one "Full name" field; every
-  Greeting shows first name only, per your explicit instruction.
+- **`src/lib/email/first-name.ts`** — `getFirstName()`. Originally needed
+  because `PreOrder` only stored one "Full name" field; superseded in
+  practice once the Checkout & Logo Polish pass split that into
+  `customerFirstName`/`customerLastName` (§4.7), but kept as-is here
+  since every Greeting still shows first name only, per your explicit
+  instruction, and nothing needed to change at its call sites.
 - **`EmailService` interface** (`src/lib/email/types.ts`) — swappable
   send abstraction, same pattern as `StorageAdapter`
-  (`src/lib/storage/types.ts`). Its only implementation this sprint,
-  `consoleEmailService`, just logs — nothing calls `.send()` yet. A real
+  (`src/lib/storage/types.ts`). Its only implementation through Sprint 4,
+  `consoleEmailService`, just logs — nothing called `.send()` at all
+  before Sprint 5. **Sprint 5's `requestEditLink` (§2.6) is the first
+  real call site** — still against the console driver (confirmed with you
+  before building, §2.16.4/§15), so "sending" still just logs. A real
   driver (Resend, Brevo, SES, ...) plugs in behind this interface later
   with no changes needed anywhere that already imports `emailService`; no
   provider is hard-coded, per your explicit instruction.
@@ -985,6 +1018,79 @@ separate from Product Filters per the brief's explicit requirement.
 Styling matches `FilterChips`'/unselected-`VariantPills`' existing
 outline-pill language rather than introducing a new pill treatment.
 
+### 2.21 Customer Self-Service Portal (`/edit/[token]`, Sprint 5)
+
+The destination of every edit link — a complete, passwordless, editable
+view of one customer's pre-order. Reached only via the secure `editToken`
+(§4.7); the customer never sees or enters the token itself, only ever
+clicks a link that already has it (§2.6).
+
+**Linking, not a new wishlist system**: opening the page mounts
+`LinkBrowserOnMount.tsx` (mirrors `ClearCartOnMount.tsx`'s exact
+"Server-Action-on-mount, nothing to render" shape), which sets the same
+`shokakko_preorder_token` cookie `submitPreOrder` already sets. From that
+moment, this browser's `WishlistContext` (§2.3) is in linked mode against
+this exact order — browsing anywhere else on the site and tapping ♡
+already saves here, no new "add to wishlist" UI was needed inside the
+portal itself.
+
+**Products**: each `OrderItem` shows its photo, name, `VariantPills`
+(reused as-is, §2.17) if the product has a variant group, price,
+`QuantitySelector` (reused as-is, minimum 1 — going to zero isn't exposed
+via the stepper, "Remove" is the explicit action for that), computed
+subtotal, and a Remove button, plus an order total. Every change — a
+variant swap, a quantity change — re-fetches the live product/variant
+server-side and re-snapshots the price, same never-trust-stale-data
+principle as `submitPreOrder`.
+
+**Wishlist**: shows what's currently saved to this order (image, name,
+variant label, price), with Remove (reuses `toggleWishlistItem` from
+`components/wishlist/actions.ts` directly — no new action needed) and
+Move to Pre-order (`moveWishlistItemToOrder` — increments a matching
+existing `OrderItem` or creates a new one, same snapshot shape as
+`submitPreOrder`, then drops the `WishlistItem`) actions per row, plus a
+"Browse more products" link.
+
+**Customer Information**: First/Last Name, Email, structured Shipping
+Address, structured Billing Address (+ "same as shipping"), Notes — its
+own form with a **Save Changes** button and an inline "Your preorder has
+been updated successfully" confirmation (no page reload). Deliberately
+does **not** include Shipping Method, even though it's part of the
+`orderFormSchema` this reuses (`.omit({ shippingMethod: true })`) — kept
+out to match exactly what was asked for this section.
+
+**Notification Preferences**: three checkboxes — "Notify me when new
+products are added," "...when product prices are updated," "Remind me 24
+hours before preorder closes" — each backed by a `PreOrder` boolean
+column, saving the instant it's toggled (no Save button, per the
+explicit "save immediately" requirement). **Stored and fully editable
+this sprint; not yet consumed by anything** — `EmailDigest`'s recipient
+list (§2.16.3) is still a broadcast to every non-unsubscribed order, same
+gap Sprint 3's PRD already documented ("Wishlist/Pre-order-targeted
+digest recipients... not built"). Wiring these preferences into real
+send-targeting is exactly the kind of future work this schema is now
+ready for, not built here.
+
+**Order Timeline**: a plain-language history — "Order Created," then
+"Updated" for every change after that (regardless of its real type — the
+admin Order History, §2.11, shows the real type per row instead), ending
+in a "Current Version" marker. Keyed off each `OrderHistoryEntry`'s
+actual `type` field, not just "is this the first row" — an order placed
+before this sprint has no `order_created` row at all, so treating
+position as the signal would mislabel its first real change as "Order
+Created" (caught during this sprint's own verification, fixed before
+shipping). "Last Updated" (shown in the portal's header, alongside Order
+Number and Event Name) is the same data source's latest timestamp, not a
+separate stored column — see §4.7's `OrderHistoryEntry` note.
+
+**A broken or expired link shows a friendly message**, not a bare 404 —
+"This link is invalid or has expired," with a link back to My Pre-order.
+
+Full site chrome (`SiteHeader` + `CartDrawer` + `WishlistDrawer`, same
+full-catalog-fetch pattern as `/product/[id]` and the Sprint 4 `/[slug]`
+route) so the header's cart/wishlist icons behave identically to every
+other page on the site.
+
 ---
 
 ## 3. Screens (complete list, exactly as they behave today)
@@ -995,7 +1101,8 @@ outline-pill language rather than introducing a new pill treatment.
 | Product Details | `/product/[id]` | Public | Image gallery, full details, wishlist/add-to-pre-order (§2.14) |
 | Checkout | `/checkout` | Public | Cart summary, pre-order info, shipping notice, pre-order form (§2.2) |
 | Order confirmation | `/order/[orderNumber]` | Public (token-based via the order number) | Order summary, clears the cart (§2.5) |
-| My Pre-order (placeholder) | `/my-preorders` | Public | Static explanation, no functionality (§2.6) |
+| My Pre-order | `/my-preorders` | Public | Email-lookup form, sends a secure edit link (§2.6) |
+| Self-Service Portal | `/edit/[token]` | Public (token-based) | Full editable pre-order — products, wishlist, customer info, notification preferences, timeline (§2.21) |
 | Collection | `/collections/[id]` | Public | Products in one tag — Email Collection Cards link here (§2.16.4) |
 | Collections index | `/collections` | Public | Every collection, square image + name |
 | Unsubscribe | `/unsubscribe/[token]` | Public (token-based) | Sets `PreOrder.unsubscribedAt`, confirmation message (§2.16.4) |
@@ -1175,13 +1282,20 @@ Sprint 1 (nullable `productId`/`SetNull`), plus two Sprint 3.5 additions
 
 | Field | Type | Notes |
 |---|---|---|
-| `editToken` | `String?` | **New in Sprint 2** — `@unique`, nullable (old pre-Sprint-2 orders have none). A random 24-char token (`nanoid`, `src/lib/edit-token.ts`) generated once at submission and never rotated. Three purposes: (1) the future `/edit/{token}` URL, (2) the `shokakko_preorder_token` cookie that links linked-mode wishlist writes back to this order (§2.3), and (3) **new in Sprint 3** — the `/unsubscribe/{token}` link in every email's Footer. |
+| `editToken` | `String?` | **New in Sprint 2** — `@unique`, nullable (old pre-Sprint-2 orders have none). A random 24-char token (`nanoid`, `src/lib/edit-token.ts`) generated once at submission and never rotated. Purposes: (1) the `/edit/{token}` Self-Service Portal URL (real as of Sprint 5, §2.21), (2) the `shokakko_preorder_token` cookie that links linked-mode wishlist writes back to this order (§2.3), and (3) the `/unsubscribe/{token}` link in every email's Footer. |
 | `wishlistItems` | `WishlistItem[]` | **New in Sprint 2** — see §4.7a. |
 | `unsubscribedAt` | `DateTime?` | **New in Sprint 3** — set when this customer clicks Unsubscribe (§2.16.4); excludes them from every future `EmailDigest`'s `recipients`. |
 | `receivedDigests` | `EmailDigest[]` | **New in Sprint 3** — which digests counted this order as a recipient (computed at generate time). |
+| `notifyNewProducts` / `notifyPriceUpdates` / `notifyReminderBeforeClose` | `Boolean` | **New in Sprint 5**, default `true` each — customer-managed notification preferences, editable from the Self-Service Portal (§2.21). Stored and saveable; **not yet consumed** by `EmailDigest` recipient targeting, which remains a broadcast (see `EmailDigest`'s own note, §4.7b). |
+| `historyEntries` | `OrderHistoryEntry[]` | **New in Sprint 5** — see §4.7f. |
 
 The only functional change to `orderNumber` itself is **how** it's
-generated (§2.7) — the column didn't change shape.
+generated (§2.7) — the column didn't change shape. "Last Updated," shown
+in the Self-Service Portal's header, is deliberately **not** a stored
+`updatedAt` column — it's derived from the latest `historyEntries`
+timestamp (falling back to `createdAt` if there's somehow no history yet)
+so it doesn't need a manual bump on every mutation across `OrderItem`/
+`WishlistItem`/`PreOrder` itself.
 
 ### 4.7a `WishlistItem` (new in Sprint 2)
 
@@ -1281,6 +1395,33 @@ this last trigger point has).
 | `sortOrder` | `Int` | Default `0` — the section's position on the page |
 | `createdAt` / `updatedAt` | `DateTime` | Auto-managed |
 
+### 4.7f `OrderHistoryEntry` (new in Sprint 5)
+
+One row per meaningful change to a `PreOrder` after it's created — feeds
+both the Self-Service Portal's customer-facing Order Timeline (§2.21,
+collapsed to "Order Created" / "Updated" × N / "Current Version") and the
+admin Order History (§2.11, full detail per row). Same "small generic
+feed, not a full audit log" shape and reasoning as Sprint 3.5's
+`ActivityLog`, just scoped to one order instead of being a site-wide
+feed.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `String` (cuid) | Primary key |
+| `preOrderId` | `String` | FK → `PreOrder.id`, `onDelete: Cascade` |
+| `type` | `String` | `"order_created"` \| `"product_added"` \| `"product_removed"` \| `"variant_changed"` \| `"quantity_changed"` \| `"shipping_address_updated"` \| `"billing_address_updated"` \| `"customer_info_updated"` \| `"notification_preferences_updated"` — see `ORDER_HISTORY_TYPES` in `src/lib/validations/order-history.ts` |
+| `message` | `String` | Short, human-readable line, e.g. "Bear Notebook removed" |
+| `createdAt` | `DateTime` | Auto-set |
+
+Written by every mutation in `src/app/edit/[token]/actions.ts` on
+success, plus one insert in `submitPreOrder` (`order_created`) so the
+timeline has a real starting point from day one. An order placed before
+this sprint has no `order_created` row at all — its Timeline/History
+simply start from whatever the first change after Sprint 5 happens to be
+(the Timeline component keys its "Order Created" label off the entry's
+real `type`, not its position, specifically to handle this correctly —
+see §2.21).
+
 ### 4.8 Migration history (Sprint 1's expand-then-contract sequence)
 
 Because the dev database already held **real data** by the time this
@@ -1321,7 +1462,9 @@ one new nullable `variantId` column each on `WishlistItem`/`OrderItem`
 existing data. **Sprint 4** added two brand-new tables (`EventPage`,
 `PageSection`) with no columns on any existing table at all — the
 simplest possible additive shape, `prisma migrate dev` applied cleanly on
-the first attempt.
+the first attempt. **Sprint 5** added three `Boolean` columns on
+`PreOrder` plus one new table (`OrderHistoryEntry`) — additive again,
+applied cleanly on the first attempt, no data loss.
 
 ### 4.9 Entity relationships
 
@@ -1338,6 +1481,7 @@ ProductVariant ──(one-to-many, optional FK, SetNull on delete)── Wishlis
 Tag ──(many-to-many)── EmailDigest (collections)
 PreOrder ──(one-to-many, cascade on delete)── OrderItem
 PreOrder ──(one-to-many, cascade on delete)── WishlistItem
+PreOrder ──(one-to-many, cascade on delete)── OrderHistoryEntry
 PreOrder ──(many-to-many)── EmailDigest (recipients)
 EmailDigest ──(one-to-many, cascade on delete)── EmailDigestItem
 EventPage ──(one-to-many, cascade on delete)── PageSection
@@ -1369,14 +1513,20 @@ directory. Every write is a Next.js Server Action.
 | `reorderBanners` | same file | `requireAdmin()` | Batch `sortOrder` update from a drag-and-drop reorder |
 | `updateSiteSettings` | `admin/(protected)/settings/actions.ts` | `requireAdmin()` | Upserts the `SiteSettings` singleton, now including `preorderInfoHtml` |
 | `updatePreOrderStatus` | `admin/(protected)/preorders/actions.ts` | `requireAdmin()` | Updates `PreOrder.status` |
-| `submitPreOrder` | `app/order/actions.ts` | None (public) | Validates, re-fetches products **and variants** server-side, generates the next sequential order number and a secure `editToken`, creates the order (snapshotting each item's variant, §2.17) + wishlist migration (§2.3), sets the `shokakko_preorder_token` cookie, feeds `ActivityLog` (`order_submitted`) |
-| `toggleWishlistItem` | `components/wishlist/actions.ts` | None (public — scoped by the caller's cookie-derived token, not a login) | **New in Sprint 2**, extended in Sprint 3.5 with an optional `variantId` parameter. Looks up the `PreOrder` by `editToken`, no-ops silently if not found, otherwise creates/deletes the matching `WishlistItem` row (validating the variant actually belongs to the product first) and, on create, feeds `ActivityLog` (`wishlist_added`, §2.19). Called by `WishlistContext` only once a wishlist is in linked mode (§2.3) |
+| `submitPreOrder` | `app/order/actions.ts` | None (public) | Validates, re-fetches products **and variants** server-side, generates the next sequential order number and a secure `editToken`, creates the order (snapshotting each item's variant, §2.17) + wishlist migration (§2.3), sets the `shokakko_preorder_token` cookie, feeds `ActivityLog` (`order_submitted`) and — **new in Sprint 5** — `OrderHistoryEntry` (`order_created`) |
+| `toggleWishlistItem` | `components/wishlist/actions.ts` | None (public — scoped by the caller's cookie-derived token, not a login) | **New in Sprint 2**, extended in Sprint 3.5 with an optional `variantId` parameter. Looks up the `PreOrder` by `editToken`, no-ops silently if not found, otherwise creates/deletes the matching `WishlistItem` row (validating the variant actually belongs to the product first) and, on create, feeds `ActivityLog` (`wishlist_added`, §2.19). Called by `WishlistContext` once a wishlist is in linked mode (§2.3), and — **new in Sprint 5** — reused directly by the Self-Service Portal's wishlist Remove button (§2.21), no wrapper needed |
 | `generateEmail` | `admin/(protected)/emails/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Saves the Notification Centre form onto the current draft `EmailDigest`, computes/snapshots New Products + Price Updates, advances `Product.lastNotifiedPriceCents`, computes recipients, renders + saves `renderedHtml` (§2.16.3). Never calls `emailService.send()` |
 | `updateTagImage` | `admin/(protected)/collections/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Uploads/removes a `Tag`'s square Collection Card image |
 | `updatePurchaseStatus` | `admin/(protected)/purchases/actions.ts` | `requireAdmin()` | **New in Sprint 3.5.** Updates `Product.purchaseStatus` or `ProductVariant.purchaseStatus` (whichever applies) for one Buying List row (§2.18) |
 | `createEventPage` / `updateEventPage` / `deleteEventPage` | `admin/(protected)/event-pages/actions.ts` | `requireAdmin()` | **New in Sprint 4.** `EventPage` CRUD — slug uniqueness/reserved-word checks on create, slug locked + delete refused for `PROTECTED_SLUGS` (§2.20.2) |
 | `addSection` / `deleteSection` / `duplicateSection` / `reorderSections` | same file | `requireAdmin()` | **New in Sprint 4.** Section list management — `reorderSections` mirrors `reorderBanners`' one-`$transaction`-of-index-updates shape exactly (§2.20.3) |
 | `updateTextSection` / `updateImageSection` / `updateGallerySection` / `updateButtonSection` | same file | `requireAdmin()` | **New in Sprint 4.** One dedicated, per-type-validated action per section type — image/gallery variants upload via `storage.save`, run new files through `compressImageFile` (§2.20.4) |
+| `requestEditLink` | `app/my-preorders/actions.ts` | None (public) | **New in Sprint 5.** Looks up the most recent `PreOrder` by email, sends the Edit Link Email if found — always returns the identical message regardless of outcome (§2.6) |
+| `linkBrowserToOrder` | `app/edit/[token]/actions.ts` | None (public — token-scoped, same bearer model as `toggleWishlistItem`) | **New in Sprint 5.** Called once on mount by `LinkBrowserOnMount.tsx`; sets the `shokakko_preorder_token` cookie so this browser's `WishlistContext` switches into linked mode against this order (§2.21) |
+| `updateOrderItemQuantity` / `updateOrderItemVariant` / `removeOrderItem` | same file | None (public, token-scoped) | **New in Sprint 5.** Re-fetches live product/variant data server-side on every change (never trusts client price/name data); each logs one `OrderHistoryEntry` |
+| `moveWishlistItemToOrder` | same file | None (public, token-scoped) | **New in Sprint 5.** Increments a matching existing `OrderItem` or creates one (same snapshot shape as `submitPreOrder`), then deletes the `WishlistItem` |
+| `updateCustomerInfo` | same file | None (public, token-scoped) | **New in Sprint 5.** Validates via `orderFormSchema.omit({ shippingMethod: true })`; diffs old vs. new to log the specific `OrderHistoryEntry` type(s) that actually changed |
+| `updateNotificationPreference` | same file | None (public, token-scoped) | **New in Sprint 5.** Saves one of the three notification boolean columns the instant its checkbox is toggled |
 
 Still no API rate limiting, no API key/token auth, no separate backend
 service — the "API" and the web app remain the same Next.js process.
@@ -1406,12 +1556,29 @@ src/
 │   │   ├── page.tsx                 Fetches SiteSettings too (logo, preorderInfoHtml)
 │   │   └── CheckoutForm.tsx         + pre-order info render, shipping notice,
 │   │                                 + wishlistJson hidden field (Sprint 2)
-│   ├── my-preorders/page.tsx      Still a placeholder; ends with <Footer />
+│   ├── my-preorders/               Real as of Sprint 5 (§2.6):
+│   │   ├── page.tsx                  Email-lookup form + <Footer />
+│   │   ├── actions.ts                requestEditLink — same message regardless of outcome
+│   │   └── RequestEditLinkForm.tsx   Client, useActionState
+│   ├── edit/[token]/               NEW (Sprint 5) — the Self-Service Portal (§2.21):
+│   │   ├── page.tsx                  Fetches PreOrder by editToken; friendly message
+│   │   │                             (not a bare 404) if the token doesn't match
+│   │   ├── actions.ts                Every mutation — quantity/variant/remove,
+│   │   │                             move-wishlist-to-order, customer info,
+│   │   │                             notification preferences, linkBrowserToOrder
+│   │   ├── LinkBrowserOnMount.tsx    Mirrors cart/ClearCartOnMount.tsx's exact shape
+│   │   ├── OrderItemsSection.tsx     VariantPills/QuantitySelector reused as-is
+│   │   ├── WishlistSection.tsx       Remove reuses toggleWishlistItem directly
+│   │   ├── CustomerInfoForm.tsx      Own Save Changes button + inline confirmation
+│   │   ├── NotificationPreferences.tsx  Instant-save per checkbox
+│   │   └── OrderTimeline.tsx         Order Created / Updated x N / Current Version
 │   ├── order/
 │   │   ├── actions.ts               submitPreOrder: + editToken generation, wishlist
-│   │   │                             migration, sets shokakko_preorder_token cookie
+│   │   │                             migration, sets shokakko_preorder_token cookie,
+│   │   │                             + OrderHistoryEntry (order_created) (Sprint 5)
 │   │   └── [orderNumber]/page.tsx   Confirmation + ClearCartOnMount, <Footer />,
-│   │                                 + Edit My Pre-order card (Sprint 2, §2.5)
+│   │                                 + Edit My Pre-order card — a real link as of
+│   │                                 Sprint 5, was inert text through Sprint 4 (§2.5)
 │   ├── collections/
 │   │   ├── page.tsx                 NEW (Sprint 3) — index of every collection
 │   │   └── [id]/page.tsx            NEW (Sprint 3) — one collection's products,
@@ -1452,7 +1619,8 @@ src/
 │           ├── settings/            + PreorderInfoEditor.tsx (Tiptap);
 │           │                         + Email settings section (Sprint 3)
 │           └── preorders/           + shows a "{Variant group}: {Variant}" line
-│                                     per item when present (Sprint 3.5, §2.17)
+│                                     per item when present (Sprint 3.5, §2.17);
+│                                     + Order History card, [id]/page.tsx (Sprint 5, §2.11)
 ├── components/
 │   ├── Logo.tsx                    Unchanged text wordmark (fallback when no logo uploaded)
 │   ├── ui/
@@ -1528,7 +1696,7 @@ src/
     │   │                              collection/unsubscribe links, footer links)
     │   ├── first-name.ts             getFirstName()
     │   ├── render.ts                 renderConfirmationEmail/renderUpdateEmail/
-    │   │                              renderReminderEmail (@react-email/render)
+    │   │                              renderReminderEmail/renderEditLinkEmail (Sprint 5)
     │   ├── components/                The 8-component Email Design System +
     │   │   │                          brand.ts, ResponsiveCardGrid, EmailLayout
     │   │   ├── Header.tsx, HeroBanner.tsx, Greeting.tsx, KarenNotes.tsx
@@ -1536,8 +1704,10 @@ src/
     │   │   └── ResponsiveCardGrid.tsx, EmailLayout.tsx, brand.ts
     │   ├── data/                      Business-logic layer — Prisma rows → plain props
     │   │   ├── confirmation.ts, update.ts, reminder.ts
+    │   │   └── edit-link.ts           NEW (Sprint 5) — buildEditLinkEmailData()
     │   └── templates/                 Presentation layer — compose the 8 components
     │       ├── ConfirmationEmail.tsx, UpdateEmail.tsx, ReminderEmail.tsx
+    │       ├── EditLinkEmail.tsx      NEW (Sprint 5) — Header/Greeting/CTAButton/Footer
     │       └── OrderSummary.tsx, Countdown.tsx   (template-specific, not shared)
     └── validations/
         ├── product.ts                 type/status; PRODUCT_STATUSES union;
@@ -1549,7 +1719,9 @@ src/
         │                               PURCHASE_STATUS_LABELS (§2.18)
         ├── order.ts                   generateOrderNumber() removed (superseded);
         │                               restructured for First/Last name +
-        │                               structured address (Checkout & Logo Polish pass)
+        │                               structured address (Checkout & Logo Polish pass);
+        │                               orderFormSchema reused as-is by the Self-
+        │                               Service Portal via .omit({shippingMethod}) (Sprint 5)
         ├── banner.ts
         ├── settings.ts                + preorderInfoHtml field;
         │                               + email settings fields (Sprint 3)
@@ -1557,6 +1729,9 @@ src/
         ├── event-page.ts              NEW (Sprint 4) — SECTION_TYPES, RESERVED_SLUGS,
         │                               PROTECTED_SLUGS, slugSchema, eventPageFormSchema,
         │                               per-section-type data schemas (§2.20)
+        ├── order-history.ts           NEW (Sprint 5) — ORDER_HISTORY_TYPES,
+        │                               ORDER_HISTORY_TYPE_LABELS (§2.11, §2.21)
+        ├── edit-link.ts                NEW (Sprint 5) — requestEditLinkSchema (§2.6)
         └── utils.ts                   Unchanged
 ```
 
@@ -1742,6 +1917,22 @@ meaningfully, with two additions worth noting:
   trust boundary and same class of gap as the pre-existing banner
   `buttonUrl` field above; only the single admin password-holder can
   reach these forms.
+
+**New in Sprint 5**:
+
+- **"Send Me My Edit Link" (`/my-preorders`) has no rate limiting** — the
+  same unaddressed gap this document already documents for the admin
+  login and the checkout form (this section's opening paragraph), now
+  also true of a second public, unauthenticated form. Its own design
+  correctly never reveals whether a given email has an order (§2.6), but
+  nothing stops repeated submissions from the same source.
+- **Every Self-Service Portal mutation trusts the `editToken` alone** —
+  same bearer-token model `toggleWishlistItem` already established
+  (§17's **Edit Token** entry), extended to a much larger surface (order
+  item edits, customer info, notification preferences). Not a new class
+  of risk beyond what that model already accepts, but worth naming
+  explicitly now that the token guards real order mutations, not just a
+  wishlist toggle.
 
 ---
 
@@ -2031,6 +2222,24 @@ New or changed in Sprint 3.5:
     invariant ever changes (e.g. a future "add the same variant twice as
     separate lines" feature).
 
+New or changed in Sprint 5:
+
+23. **Email lookup on `/my-preorders` is case-sensitive** — matches
+    exactly how the address was typed at checkout. SQLite has no
+    case-insensitive collation configured on this column, and Postgres's
+    `mode: "insensitive"` isn't available here — a real but low-impact
+    limitation (email autofill/paste rarely changes case), documented
+    rather than engineered around with a shadow normalized-email column.
+24. **Notification preferences don't yet change who receives anything** —
+    fully stored and customer-editable (§2.21), but `EmailDigest`'s
+    recipient list is still a broadcast to every non-unsubscribed order,
+    same gap Sprint 3's PRD already named. See §16.
+25. **No confirmation before a portal mutation applies** except Remove
+    actions (native `window.confirm`) — a variant swap or quantity change
+    saves the instant it's clicked, matching this app's established
+    "instant save" convention for lists of inline controls elsewhere
+    (Purchase Dashboard, Page Builder), not a gap specific to this sprint.
+
 ---
 
 ## 15. Planned Features
@@ -2039,30 +2248,26 @@ Concretely scoped, but explicitly deferred out of Sprint 1 by name — these
 are not speculative, they were named directly in the sprint brief and then
 excluded on purpose:
 
-- **The real "Retrieve My Pre-order" flow** behind `/my-preorders`:
-  accountless, email-based lookup ("enter your email, get a secure edit
-  link"). The signed-link mechanism itself is built (every `PreOrder` has
-  a stored, unique `editToken`, §4.7) and Sprint 3 built the full
-  Confirmation Email template that would carry it — what's still missing
-  is looking an order up by email address, and actually sending anything
-  (see the `EmailService` item below).
-- **The `/edit/{token}` page itself** — the customer-facing pre-order edit
-  page the token already points at (§2.5/§2.6). Every email template's
-  CTA/edit link already points at this URL; the route it resolves to
-  still doesn't exist.
+- ~~**The real "Retrieve My Pre-order" flow** behind `/my-preorders`~~ —
+  **built in Sprint 5** (§2.6). Kept here, struck through, only so the
+  cross-reference below (`EmailService`) still reads sensibly — see §2.21
+  for what actually shipped.
+- ~~**The `/edit/{token}` page itself**~~ — **built in Sprint 5** as the
+  Self-Service Portal (§2.21).
 - **CSV export of pre-orders themselves** from the admin pre-order list,
   for offline fulfillment planning — **not** built this sprint. Sprint 3.5
   added CSV export, but scoped to the Purchase Dashboard's Buying List
   (§2.18), a different export with different columns; the underlying
   `Blob`/download mechanic is generic and could be reused for a pre-order
   export later.
-- **A real `EmailService` driver** (Sprint 4-scoped, per your explicit
-  Sprint 3 answer) — Resend, Brevo, SES, or similar, implementing the
-  interface already defined in `src/lib/email/types.ts` (§2.16.4). This
-  is what turns "Generate Email" into an actual send, wires Confirmation
-  Email to fire on checkout submission, gives Reminder Email a real
-  trigger (manual admin send vs. scheduled — undecided), and moves
-  per-recipient personalized rendering (already supported by
+- **A real `EmailService` driver** — still not built as of Sprint 5,
+  confirmed with you again before that sprint started rather than
+  assumed — Resend, Brevo, SES, or similar, implementing the interface
+  already defined in `src/lib/email/types.ts` (§2.16.4). This is what
+  turns "Generate Email" and `requestEditLink` (§2.6) into actual sends,
+  wires Confirmation Email to fire on checkout submission, gives Reminder
+  Email a real trigger (manual admin send vs. scheduled — undecided), and
+  moves per-recipient personalized rendering (already supported by
   `renderUpdateEmail()`) from theoretical to real.
 - **Real Canva-designed Confirmation and Reminder templates** — Sprint 3
   shipped placeholder layouts for both, per your explicit answer; you'll
@@ -2076,6 +2281,10 @@ excluded on purpose:
   — `EmailDigest`/`EmailDigestItem` already reference the specific
   products involved, and `WishlistItem`/`OrderItem` already link
   products back to `PreOrder`s — just new query logic at generate time.
+  **Sprint 5 built the customer-facing half of this** (the three
+  `notifyNewProducts`/`notifyPriceUpdates`/`notifyReminderBeforeClose`
+  preferences, §2.21) — what's still missing is the generate-time query
+  logic actually reading them.
 - **Scheduled daily digest** (e.g. automatically at 6:00 PM) — also named
   in the original brief and explicitly not built. The Notification
   Centre's "current draft" model (§2.16.3) doesn't block this: a
@@ -2196,6 +2405,29 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
     `{ tagId }` shape, querying `Product` at render time) rather than
     being fully self-contained like the other five — worth noting since
     it's a different shape of complexity from the rest.
+- **Named directly in the Sprint 5 brief's "Future Compatibility"
+  section, explicitly not built this sprint**:
+  - *Order Lock after Cut-off Date* — would most naturally be a computed
+    check against `SiteSettings.countdownTargetAt` (already the same
+    field the homepage countdown and Reminder Email use), gating the
+    Self-Service Portal's mutation actions once the date passes, rather
+    than a new stored field.
+  - *Staff Notes* — a second, admin-only notes field on `PreOrder`
+    (`order.notes` is customer-editable and customer-visible; a separate
+    `staffNotes` column, shown only in `/admin/preorders/[id]`, would sit
+    alongside it with no conflict).
+  - *Order Status* — already exists (`PreOrder.status`, §4.7); if this
+    meant something more granular (e.g. a fulfillment sub-status), it
+    would extend, not replace, the existing field.
+  - *Payment Status* / *Invoice History* — this app deliberately collects
+    no payment ("no payment was taken" is shown on every order
+    confirmation); either would be a genuinely new `Payment`/`Invoice`
+    model with no assumptions blocking it in the current schema.
+  - *Customer Messages* — a `Message` model referencing `PreOrder`, in
+    the same shape as `OrderHistoryEntry` (§4.7f) but customer-authored
+    instead of system-generated; that table's existence as a precedent
+    for "small, `PreOrder`-scoped, append-only" data is exactly what this
+    would extend.
 
 ---
 
@@ -2291,3 +2523,16 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
   `product`, `unsubscribe`) that a new `EventPage`'s slug is blocked from
   using, so an admin never creates a page that's silently unreachable
   behind a real route (§2.20.2).
+- **Self-Service Portal**: the customer-facing page at `/edit/{token}`
+  (§2.21, Sprint 5) — a complete, passwordless, editable view of one
+  pre-order (products, wishlist, customer info, notification
+  preferences, timeline). The destination every edit link points to.
+- **`OrderHistoryEntry`**: one row per meaningful change to a `PreOrder`
+  (§4.7f) — powers both the Self-Service Portal's simplified Order
+  Timeline and the admin's full-detail Order History (§2.11). Same
+  small-generic-feed shape as `ActivityLog`, scoped to one order.
+- **Notification preferences**: the three customer-managed booleans on
+  `PreOrder` (new products, price updates, 24-hour close reminder) —
+  editable from the Self-Service Portal, saved instantly per toggle.
+  Stored, not yet consumed by anything (§15/§16) — a deliberate,
+  documented scope boundary, not an oversight.

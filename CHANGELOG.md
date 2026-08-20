@@ -2,6 +2,66 @@
 
 Notable changes to the Shokakko Australia pre-order site, newest first.
 
+## Sprint 5 — Customer Self-Service Portal (2026-08-20)
+
+Closes the loop every prior sprint deferred: since Sprint 2, every order
+has carried a secure, unguessable edit token with nowhere for a customer
+to actually use it. This sprint builds the full accountless retrieval +
+editing flow — no passwords, no accounts, ever.
+
+### Added
+
+- **"My Pre-order"** (`/my-preorders`) — replaces the Sprint 1 placeholder
+  with a real email-lookup form. Never reveals whether an address has an
+  order: every outcome (found, not found, or a send failure) shows the
+  identical message, "If a preorder exists for this email address, a
+  secure edit link has been sent to your email."
+- **The Self-Service Portal** (`/edit/{token}`) — a complete editable view
+  of a customer's pre-order:
+  - **Products**: change variant (pills), change quantity, remove an
+    item — each saves instantly, price re-fetched live on any change.
+  - **Wishlist**: opening the portal links that browser to the order (same
+    cookie checkout already sets), so browsing the site and tapping ♡
+    anywhere already saves to this exact order — no new UI needed for
+    that. The portal itself shows what's saved, with Remove and Move to
+    Pre-order actions.
+  - **Customer Information**: name, email, shipping address, billing
+    address, notes — its own Save Changes button, inline "Your preorder
+    has been updated successfully" confirmation, no page reload.
+  - **Notification Preferences**: three toggles (new products, price
+    updates, 24-hour close reminder), each saving the instant it's
+    switched.
+  - **Order Timeline**: Order Created → Updated (× however many changes)
+    → Current Version, in plain language.
+- **Admin Order History** — a new section on each pre-order's admin detail
+  page listing every change with its real type, date, and time (Order
+  Created, Product Added/Removed, Variant/Quantity Changed, Shipping/
+  Billing Address Updated, Notification Preferences Updated, ...).
+- The order confirmation page's edit link is now a real, clickable link
+  (was inert text through Sprint 4, since the page it pointed to didn't
+  exist yet).
+
+### Scope note
+
+No real email provider is wired up this sprint (confirmed with you before
+building) — "sending" still logs to the server console, exactly like
+every email-shaped feature since Sprint 3. Everything else — the lookup,
+the token, the entire portal, the timeline, the admin history — is fully
+built and working; swapping in a real provider later is a small, isolated
+change or an already-established interface. Notification preferences are
+stored and fully editable, but don't yet change who actually receives an
+Update Email — that targeting logic was already documented as future
+work in Sprint 3's PRD notes.
+
+### Fixed (found during this sprint's own verification)
+
+- **The customer-facing Order Timeline mislabeled a legacy order's first
+  change as "Order Created"** — it originally picked the label
+  positionally (index 0 = Created), but an order placed before this
+  sprint has no real `order_created` history row at all, so its first
+  logged entry is actually whatever else changed first. Fixed to key off
+  the entry's real type instead of its position.
+
 ## Sprint 4 — Event Pages CMS (2026-08-15)
 
 Transforms the site into a small Event Platform: a block-based CMS Karen
