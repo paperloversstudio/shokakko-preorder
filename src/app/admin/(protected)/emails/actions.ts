@@ -3,125 +3,74 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { emailDigestFormSchema } from "@/lib/validations/email-digest";
-import { flattenZodError } from "@/lib/validations/utils";
 import {
   computeNewProductCandidates,
   computePriceUpdateCandidates,
   computeSoldOutCandidates,
-  buildUpdateEmailData,
 } from "@/lib/email/data/update";
-import { renderUpdateEmail } from "@/lib/email/render";
+import { resolveTemplateSections, type ResolvedSection } from "@/lib/email/data/generic";
+import { renderGenericEmail } from "@/lib/email/render";
+import { buildFooterLinks } from "@/lib/email/site-url";
 import { sendTrackedEmail, retryEmailLog as retryEmailLogWorker } from "@/lib/email/queue";
 
-export type DigestFormState = {
-  error?: string;
-  fieldErrors?: Record<string, string>;
-  generated?: boolean;
-};
+export type DigestFormState = { error?: string; generated?: boolean };
 
 /** "Current draft" = the most recent EmailDigest not yet sent. Created
  * lazily on first visit to the Notification Centre, same lightweight
- * pattern as SiteSettings' singleton row. Once a digest reaches "sent"
- * (Sprint 4), this stops finding it and the next call creates a fresh
- * draft — sent digests stay immutable history under /admin/emails/history. */
+ * pattern as SiteSettings' singleton row. Once a digest reaches "sent",
+ * this stops finding it and the next call creates a fresh draft — sent
+ * digests stay immutable history under /admin/emails/history. */
 export async function findOrCreateCurrentDraft() {
   const existing = await db.emailDigest.findFirst({
     where: { status: { in: ["draft", "generated"] } },
     orderBy: { createdAt: "desc" },
-    include: {
-      collections: true,
-      recommendedProducts: {
-        include: { images: { orderBy: { sortOrder: "asc" }, take: 1 } },
-      },
-    },
   });
   if (existing) return existing;
 
-  return db.emailDigest.create({
-    data: {},
-    include: {
-      collections: true,
-      recommendedProducts: {
-        include: { images: { orderBy: { sortOrder: "asc" }, take: 1 } },
-      },
-    },
-  });
+  return db.emailDigest.create({ data: {} });
 }
 
-function parseDigestForm(formData: FormData) {
-  return emailDigestFormSchema.safeParse({
-    subject: formData.get("subject")?.toString() ?? "",
-    karenNotesHtml: formData.get("karenNotesHtml")?.toString() ?? "",
-    showKarenNotes: formData.get("showKarenNotes") === "on",
-    showCollections: formData.get("showCollections") === "on",
-    showRecommended: formData.get("showRecommended") === "on",
-    showNewProducts: formData.get("showNewProducts") === "on",
-    showPriceUpdates: formData.get("showPriceUpdates") === "on",
-    showSoldOut: formData.get("showSoldOut") === "on",
-    ctaText: formData.get("ctaText")?.toString() ?? "",
-    ctaUrl: formData.get("ctaUrl")?.toString() ?? "",
-  });
-}
+/** Section types that count as real "something to say" content — a
+ * recipient whose resolved sections are only structural (Greeting,
+ * Footer, the CTA button) has nothing worth sending. */
+const CONTENT_SECTION_TYPES = new Set<ResolvedSection["type"]>([
+  "hero_banner",
+  "rich_text",
+  "image",
+  "collection_cards",
+  "product_cards_grid",
+  "product_cards_order",
+]);
 
 /**
- * The Notification Centre's one primary action, matching your description
- * of "Generate Email": saves whatever's currently in the form onto the
- * draft (toggles, Karen's Notes, Collections/Recommended Products picks,
- * CTA, subject), computes New Products / Price Updates / Sold Out from
- * live product state, snapshots them into EmailDigestItem, computes the
- * recipient list/count, and renders + saves the final (preview) HTML.
+ * The Notification Centre's "Generate Email" — computes/snapshots New
+ * Products/Price Updates/Sold Out into EmailDigestItem (unchanged from
+ * Sprint 6), then resolves the admin-authored "digest" EmailTemplate
+ * (Email Template Manager) into a preview render. No form input anymore
+ * — the template's structure lives in the Template Manager now, not a
+ * form on this page — so this just computes + snapshots + renders
+ * whatever the current template says.
  *
- * Sprint 6 — the diff-consuming checkpoints (`lastNotifiedPriceCents`,
- * `lastNotifiedStatus`, `isNew`) are deliberately NOT advanced here
- * anymore; that now happens in `sendDigest()` below, only after every
- * recipient's copy has actually been (attempted to be) sent — "mark as
- * published" only once something was truly published, not just previewed.
+ * The diff-consuming checkpoints (`lastNotifiedPriceCents`,
+ * `lastNotifiedStatus`, `isNew`) are NOT advanced here — that happens in
+ * `sendDigest()` below, only after every recipient's copy has actually
+ * been (attempted to be) sent.
  */
 export async function generateEmail(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _prevState: DigestFormState,
-  formData: FormData,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _formData: FormData,
 ): Promise<DigestFormState> {
   await requireAdmin();
 
-  const parsed = parseDigestForm(formData);
-  if (!parsed.success) return { fieldErrors: flattenZodError(parsed.error) };
-  const values = parsed.data;
-
-  const karenNotesHtml =
-    values.karenNotesHtml && values.karenNotesHtml !== "<p></p>" ? values.karenNotesHtml : null;
-
-  const collectionIds = formData.getAll("collectionIds").map((v) => v.toString());
-  const recommendedProductIds = formData.getAll("recommendedProductIds").map((v) => v.toString());
-
   const draft = await findOrCreateCurrentDraft();
-
-  // Save the form's current values first, so Generate Email always
-  // reflects exactly what's on screen, not a stale prior save.
-  await db.emailDigest.update({
-    where: { id: draft.id },
-    data: {
-      subject: values.subject,
-      karenNotesHtml,
-      showKarenNotes: values.showKarenNotes,
-      showCollections: values.showCollections,
-      showRecommended: values.showRecommended,
-      showNewProducts: values.showNewProducts,
-      showPriceUpdates: values.showPriceUpdates,
-      showSoldOut: values.showSoldOut,
-      ctaText: values.ctaText,
-      ctaUrl: values.ctaUrl,
-      collections: { set: collectionIds.map((id) => ({ id })) },
-      recommendedProducts: { set: recommendedProductIds.map((id) => ({ id })) },
-    },
-  });
 
   const [newProducts, priceUpdates, soldOutProducts] = await Promise.all([
     computeNewProductCandidates(),
     computePriceUpdateCandidates(),
     computeSoldOutCandidates(),
   ]);
-  const priceUpdateProducts = priceUpdates.map((p) => p.product);
 
   const recipients = await db.preOrder.findMany({
     where: { unsubscribedAt: null },
@@ -156,7 +105,6 @@ export async function generateEmail(
         })),
       ],
     }),
-    // No checkpoint advance here anymore — see this function's doc comment.
     db.emailDigest.update({
       where: { id: draft.id },
       data: {
@@ -168,33 +116,19 @@ export async function generateEmail(
     }),
   ]);
 
-  const updateData = await buildUpdateEmailData(
-    {
-      subject: values.subject,
-      karenNotesHtml,
-      showKarenNotes: values.showKarenNotes,
-      showCollections: values.showCollections,
-      showRecommended: values.showRecommended,
-      showNewProducts: values.showNewProducts,
-      showPriceUpdates: values.showPriceUpdates,
-      showSoldOut: values.showSoldOut,
-      ctaText: values.ctaText,
-      ctaUrl: values.ctaUrl,
-      collections: collectionIds.length
-        ? await db.tag.findMany({ where: { id: { in: collectionIds } } })
-        : [],
-      recommendedProducts: recommendedProductIds.length
-        ? await db.product.findMany({
-            where: { id: { in: recommendedProductIds } },
-            include: { images: { orderBy: { sortOrder: "asc" }, take: 1 } },
-          })
-        : [],
-    },
-    newProducts,
-    priceUpdateProducts,
-    soldOutProducts,
-  );
-  const renderedHtml = await renderUpdateEmail(updateData);
+  const settings = await db.siteSettings.findUnique({ where: { id: "singleton" } });
+  const logoUrl = settings?.logoUrl ?? null;
+  const eventName = settings?.eventName ?? null;
+  const footerLinks = await buildFooterLinks(settings, null);
+
+  const { subject, sections } = await resolveTemplateSections("digest", {
+    firstName: "there",
+    logoUrl,
+    eventName,
+    footerLinks,
+    editUrl: null,
+  });
+  const renderedHtml = await renderGenericEmail({ subject, firstName: "there", logoUrl, eventName, footerLinks, sections });
 
   await db.emailDigest.update({ where: { id: draft.id }, data: { renderedHtml } });
 
@@ -206,27 +140,24 @@ export async function generateEmail(
 export type SendDigestState = { error?: string; sent?: boolean; recipientCount?: number };
 
 /**
- * Sprint 6, Part 5 — the real "Send Update." Requires a `generated` draft
- * (Generate Email must run first). Re-derives New Products/Price Updates/
- * Sold Out from live product state (the same functions Generate used)
- * rather than trusting the EmailDigestItem snapshot, so a send always
- * reflects the freshest catalogue truth even if something was edited
- * between Generate and Send — the snapshot rows stay purely a historical
- * record for the admin history view.
+ * The real "Send Update." Requires a `generated` draft. Re-derives New
+ * Products/Price Updates/Sold Out from live product state (same
+ * functions Generate used) rather than trusting the EmailDigestItem
+ * snapshot, so a send always reflects the freshest catalogue truth even
+ * if something was edited between Generate and Send — the snapshot rows
+ * stay purely a historical record for the admin history view.
  *
- * Loops every non-unsubscribed recipient, personalizes New Products/
- * Price Updates against that recipient's own notification preferences
- * (Part 6 — Karen's Notes/Collections/Karen's Picks/Sold Out are NOT
- * preference-gated), skips a recipient entirely if nothing would show,
- * and sends one email per recipient via `sendTrackedEmail` (Part 8) so
- * every attempt shows up in Email Logs regardless of outcome. Only after
- * the whole loop finishes does it advance the "mark as published"
- * checkpoints (`lastNotifiedPriceCents`, `lastNotifiedStatus`, `isNew`)
- * and flip the digest to "sent".
+ * Loops every non-unsubscribed recipient, resolving the "digest" template
+ * once per recipient with their own notifyNewProducts/notifyPriceUpdates
+ * excluded when off (Karen's Notes/Collections/Karen's Picks/Sold Out are
+ * NOT preference-gated), skips a recipient entirely if nothing but
+ * structural sections (Greeting/Footer/CTA) would show, and sends one
+ * email per recipient via sendTrackedEmail so every attempt shows up in
+ * Email Logs regardless of outcome. Only after the whole loop finishes
+ * does it advance the "mark as published" checkpoints and flip the
+ * digest to "sent".
  */
 export async function sendDigest(
-  // Signature shape required by useActionState — this action takes no
-  // real input, everything it needs lives on the current draft.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _prevState: SendDigestState,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -237,18 +168,12 @@ export async function sendDigest(
   const draft = await db.emailDigest.findFirst({
     where: { status: "generated" },
     orderBy: { createdAt: "desc" },
-    include: {
-      collections: true,
-      recommendedProducts: {
-        include: { images: { orderBy: { sortOrder: "asc" }, take: 1 } },
-      },
-    },
   });
   if (!draft) {
     return { error: "Generate the email first, then send it." };
   }
 
-  const [newProducts, priceUpdates, soldOutProducts, recipients] = await Promise.all([
+  const [newProducts, priceUpdates, soldOutProducts, recipients, settings] = await Promise.all([
     computeNewProductCandidates(),
     computePriceUpdateCandidates(),
     computeSoldOutCandidates(),
@@ -262,47 +187,42 @@ export async function sendDigest(
         notifyPriceUpdates: true,
       },
     }),
+    db.siteSettings.findUnique({ where: { id: "singleton" } }),
   ]);
-  const priceUpdateProducts = priceUpdates.map((p) => p.product);
+
+  const logoUrl = settings?.logoUrl ?? null;
+  const eventName = settings?.eventName ?? null;
+  const footerLinks = await buildFooterLinks(settings, null);
 
   let sentCount = 0;
   for (const recipient of recipients) {
-    const showNewProducts = draft.showNewProducts && recipient.notifyNewProducts;
-    const showPriceUpdates = draft.showPriceUpdates && recipient.notifyPriceUpdates;
+    const excludeProductSources: string[] = [];
+    if (!recipient.notifyNewProducts) excludeProductSources.push("new_products");
+    if (!recipient.notifyPriceUpdates) excludeProductSources.push("price_updates");
 
-    const hasContent =
-      (draft.showKarenNotes && !!draft.karenNotesHtml) ||
-      (draft.showCollections && draft.collections.length > 0) ||
-      (draft.showRecommended && draft.recommendedProducts.length > 0) ||
-      (showNewProducts && newProducts.length > 0) ||
-      (showPriceUpdates && priceUpdateProducts.length > 0) ||
-      (draft.showSoldOut && soldOutProducts.length > 0);
+    const { subject, sections } = await resolveTemplateSections("digest", {
+      firstName: recipient.customerFirstName,
+      logoUrl,
+      eventName,
+      footerLinks,
+      editUrl: null,
+      excludeProductSources,
+    });
+
+    const hasContent = sections.some((s) => CONTENT_SECTION_TYPES.has(s.type));
     if (!hasContent) continue; // nothing this recipient would actually see — skip
 
-    const data = await buildUpdateEmailData(
-      {
-        subject: draft.subject,
-        karenNotesHtml: draft.karenNotesHtml,
-        showKarenNotes: draft.showKarenNotes,
-        showCollections: draft.showCollections,
-        showRecommended: draft.showRecommended,
-        showNewProducts,
-        showPriceUpdates,
-        showSoldOut: draft.showSoldOut,
-        ctaText: draft.ctaText,
-        ctaUrl: draft.ctaUrl,
-        collections: draft.collections,
-        recommendedProducts: draft.recommendedProducts,
-      },
-      newProducts,
-      priceUpdateProducts,
-      soldOutProducts,
-      recipient.customerFirstName,
-    );
-    const html = await renderUpdateEmail(data);
+    const html = await renderGenericEmail({
+      subject,
+      firstName: recipient.customerFirstName,
+      logoUrl,
+      eventName,
+      footerLinks,
+      sections,
+    });
     await sendTrackedEmail({
       to: recipient.customerEmail,
-      subject: draft.subject,
+      subject,
       html,
       template: "digest",
       preOrderId: recipient.id,

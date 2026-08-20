@@ -98,6 +98,7 @@ export async function updateOrderItemVariant(
     data: {
       variantId: variant.id,
       variantName: variant.name,
+      variantGroupName: product.variantGroupName,
       // Price can legitimately change on a variant swap — re-snapshot
       // from the live variant, same never-trust-stale-data principle as
       // submitPreOrder.
@@ -173,6 +174,7 @@ export async function moveWishlistItemToOrder(
         productBrand: product.brand,
         productSku: product.sku,
         variantName: variant?.name ?? null,
+        variantGroupName: variant ? product.variantGroupName : null,
         unitPriceCents: variant?.priceCentsOverride ?? product.priceCents,
       },
     });

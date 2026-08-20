@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { formatPrice } from "@/lib/validations/product";
 import { formatAddress, formatCustomerName, SHIPPING_METHOD_LABELS } from "@/lib/validations/order";
 import { ORDER_HISTORY_TYPE_LABELS, type OrderHistoryType } from "@/lib/validations/order-history";
+import { getOrderItemOptions } from "@/lib/order-item-options";
+import { OrderItemOptions } from "@/components/shared/OrderItemOptions";
 import { StatusSelect } from "../StatusSelect";
 
 export default async function AdminPreOrderDetailPage({
@@ -53,11 +55,7 @@ export default async function AdminPreOrderDetailPage({
               <li key={item.id} className="flex items-center justify-between gap-3 py-3">
                 <div>
                   <p className="font-semibold">{item.productName}</p>
-                  {item.variantName && (
-                    <p className="text-sm font-semibold text-ink-soft">
-                      Variant: {item.variantName}
-                    </p>
-                  )}
+                  <OrderItemOptions options={getOrderItemOptions(item)} />
                   <p className="text-sm text-ink-soft">
                     {item.productBrand} · SKU {item.productSku}
                   </p>

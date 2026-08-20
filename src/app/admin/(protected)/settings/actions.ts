@@ -25,7 +25,6 @@ export async function updateSiteSettings(
     eventInfo: formData.get("eventInfo")?.toString() ?? "",
     countdownTargetAt: formData.get("countdownTargetAt")?.toString() ?? "",
     preorderInfoHtml: formData.get("preorderInfoHtml")?.toString() ?? "",
-    emailHeroLinkUrl: formData.get("emailHeroLinkUrl")?.toString() ?? "",
     emailContactUrl: formData.get("emailContactUrl")?.toString() ?? "",
     emailShippingPolicyUrl: formData.get("emailShippingPolicyUrl")?.toString() ?? "",
     emailWebsiteUrl: formData.get("emailWebsiteUrl")?.toString() ?? "",
@@ -54,26 +53,6 @@ export async function updateSiteSettings(
     logoUrl = null;
   }
 
-  // Same upload/remove pattern as the site logo above, for the Update
-  // Email's one static Hero Banner image (Sprint 3).
-  let emailHeroImageUrl = existing?.emailHeroImageUrl ?? null;
-  const removeEmailHeroImage = formData.get("removeEmailHeroImage") === "on";
-  const emailHeroImageFile = formData.get("emailHeroImage");
-  if (emailHeroImageFile instanceof File && emailHeroImageFile.size > 0) {
-    let newUrl: string;
-    try {
-      newUrl = await storage.save(emailHeroImageFile);
-    } catch (err) {
-      if (err instanceof InvalidImageError) return { error: err.message };
-      throw err;
-    }
-    if (existing?.emailHeroImageUrl) await storage.remove(existing.emailHeroImageUrl);
-    emailHeroImageUrl = newUrl;
-  } else if (removeEmailHeroImage && existing?.emailHeroImageUrl) {
-    await storage.remove(existing.emailHeroImageUrl);
-    emailHeroImageUrl = null;
-  }
-
   const countdownTargetAt = values.countdownTargetAt
     ? new Date(values.countdownTargetAt)
     : null;
@@ -91,8 +70,6 @@ export async function updateSiteSettings(
       : null;
 
   const emailFields = {
-    emailHeroImageUrl,
-    emailHeroLinkUrl: values.emailHeroLinkUrl || null,
     emailContactUrl: values.emailContactUrl || null,
     emailShippingPolicyUrl: values.emailShippingPolicyUrl || null,
     emailWebsiteUrl: values.emailWebsiteUrl || null,

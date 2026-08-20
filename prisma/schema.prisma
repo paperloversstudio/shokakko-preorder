@@ -63,13 +63,12 @@ model Product {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
-  images               ProductImage[]
-  tags                 Tag[]
-  variants             ProductVariant[]
-  orderItems           OrderItem[]
-  wishlistItems        WishlistItem[]
-  digestItems          EmailDigestItem[]
-  recommendedInDigests EmailDigest[]     @relation("DigestRecommended")
+  images        ProductImage[]
+  tags          Tag[]
+  variants      ProductVariant[]
+  orderItems    OrderItem[]
+  wishlistItems WishlistItem[]
+  digestItems   EmailDigestItem[]
 }
 
 // Sprint 3.5 — one row per pill option under a product's single variant
@@ -113,14 +112,13 @@ model ProductImage {
 }
 
 model Tag {
-  id                String        @id @default(cuid())
-  name              String        @unique
+  id       String    @id @default(cuid())
+  name     String    @unique
   // Square collection image for the Update Email's Collection Card
   // component (Sprint 3) — collections had no image at all before this;
   // managed from the new /admin/collections page.
-  imageUrl          String?
-  products          Product[]
-  featuredInDigests EmailDigest[] @relation("DigestCollections")
+  imageUrl String?
+  products Product[]
 }
 
 model HeroBanner {
@@ -158,14 +156,14 @@ model SiteSettings {
   // there's no path to an injected <script> tag without a separate
   // sanitizer — see src/app/admin/(protected)/settings/PreorderInfoEditor.tsx.
   preorderInfoHtml       String?
-  // --- Email settings (Sprint 3) --- one static hero image for the Update
-  // Email (distinct from the homepage's rotating multi-banner HeroBanner —
-  // the email only ever shows one), plus footer links for every email
+  // --- Email settings (Sprint 3) --- footer links for every email
   // template. All optional; pre-filled with the real site URLs by the
   // admin the first time these are saved, but editable independently of
   // the site-wide Footer.tsx component (which stays hardcoded/unchanged).
-  emailHeroImageUrl      String?
-  emailHeroLinkUrl       String?
+  // The email Hero Banner image itself moved off this singleton onto each
+  // EmailTemplate's own `hero_banner` section (post-Sprint-6) — a global
+  // image only the Newsletter could ever use wasn't really "editable per
+  // template."
   emailContactUrl        String?
   emailShippingPolicyUrl String?
   emailWebsiteUrl        String?
@@ -319,59 +317,61 @@ model OrderItem {
 
   // Snapshot of product details at order time, so the order stays accurate
   // even if the product is later edited or removed.
-  productName    String
-  productBrand   String
-  productSku     String
+  productName      String
+  productBrand     String
+  productSku       String
   // Sprint 3.5 — snapshot of the chosen variant's name (e.g. "Bear"), so
   // "Notebook / Design: Bear" still displays correctly even if the
   // variant is later renamed or deleted. Null when no variant was chosen.
-  variantName    String?
-  unitPriceCents Int?
+  variantName      String?
+  // Post-Sprint-6 — snapshot of the variant's *group* name (e.g.
+  // "Design"), alongside variantName above — closes a gap where the
+  // group label had no permanent record, only a live join through
+  // productId (which disappears once the product is deleted). Same
+  // "snapshot, not live-reference" reasoning as every other field on
+  // this model. Read together via getOrderItemOptions()
+  // (src/lib/order-item-options.ts), which returns an array so a future
+  // multi-option-group schema is additive there, not a rewrite of every
+  // display site.
+  variantGroupName String?
+  unitPriceCents   Int?
 }
 
 // --- Email Communication System (Sprint 3) ---
 //
-// One prepared Update Email — "collect changes throughout the day, then
-// generate" (see docs/PRD.md for the full Notification Centre write-up).
-// There's at most one draft/generated digest at a time; once a digest
-// reaches "sent" it becomes immutable history and the next Generate Email
-// starts a fresh row. `status` already includes "sent" so Sprint 4 (real
-// email delivery) only has to add the send action, not reshape this model.
-// No email is actually sent this sprint — see src/lib/email/types.ts's
-// EmailService interface, which exists for Sprint 4 to implement against.
+// One send-operation record for the Newsletter/Update Email — "collect
+// changes throughout the day, then generate one digest" (see docs/PRD.md
+// for the full Notification Centre write-up). There's at most one draft/
+// generated digest at a time; once a digest reaches "sent" it becomes
+// immutable history and the next Generate Email starts a fresh row.
+//
+// Post-Sprint-6 — this model no longer owns template *structure*
+// (subject, Karen's Notes, which sections show, CTA text/URL, picked
+// Collections/Recommended Products all used to live here as flat
+// fields/relations). That structure now lives on EmailTemplate(kind:
+// "digest")'s ordered sections (src/lib/email/data/generic.ts resolves
+// them at Generate/Send time) — one source of truth for "what's in my
+// newsletter," not two. This model keeps only what's genuinely about
+// *this one send*: its status, its rendered snapshot, who received it,
+// and which products were captured (EmailDigestItem).
 model EmailDigest {
-  id               String    @id @default(cuid())
-  status           String    @default("draft") // draft | generated | sent (sent unused until Sprint 4)
-  subject          String    @default("Shokakko Australia — Latest Updates")
-  karenNotesHtml   String?
-  showKarenNotes   Boolean   @default(false)
-  showCollections  Boolean   @default(false)
-  showRecommended  Boolean   @default(false)
-  showNewProducts  Boolean   @default(false)
-  showPriceUpdates Boolean   @default(false)
-  // Sprint 6 — same automatic-computation pattern as showNewProducts/
-  // showPriceUpdates above (not admin-picked); see Product.lastNotifiedStatus.
-  showSoldOut      Boolean   @default(false)
-  ctaText          String    @default("View New Products")
-  ctaUrl           String    @default("/")
+  id             String    @id @default(cuid())
+  status         String    @default("draft") // draft | generated | sent
   // Saved by "Generate Email" — one representative preview render (a
   // placeholder greeting name), NOT what every recipient would actually
-  // receive. Real per-recipient rendering happens at send time (Sprint 4);
-  // renderUpdateEmail() is already fully parameterized per-recipient.
-  renderedHtml     String?
-  recipientCount   Int?
-  generatedAt      DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  // receive. Real per-recipient rendering happens at send time;
+  // resolveTemplateSections() is fully parameterized per-recipient.
+  renderedHtml   String?
+  recipientCount Int?
+  generatedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  // Admin-picked: which collections/products to feature this time.
-  collections         Tag[]             @relation("DigestCollections")
-  recommendedProducts Product[]         @relation("DigestRecommended")
   // Computed at generate time — "prepare all required recipient data":
   // every PreOrder with unsubscribedAt: null as of that moment.
-  recipients          PreOrder[]        @relation("DigestRecipients")
-  items               EmailDigestItem[]
-  emailLogs           EmailLog[]
+  recipients PreOrder[]        @relation("DigestRecipients")
+  items      EmailDigestItem[]
+  emailLogs  EmailLog[]
 }
 
 // New Products / Price Updates are computed automatically (not
@@ -426,6 +426,49 @@ model EmailLog {
 
   @@index([status])
   @@index([template, sentAt])
+}
+
+// --- Email Template Manager (post-Sprint-6) ---
+//
+// Generalizes the Newsletter's admin-editable structure (previously
+// EmailDigest's own hard-wired named booleans) to cover every email kind
+// — Confirmation, Retrieve My Pre-order ("edit_link"), Reminder, and the
+// Newsletter ("digest"). Same "one open `type` string + a Json `data`
+// blob, validated at the app boundary, not by the DB" shape as Sprint 4's
+// EventPage/PageSection — see that model's own comment for the reasoning,
+// which applies identically here: a new section type is a new `type`
+// value + a new Zod schema in src/lib/validations/email-template.ts, not
+// a migration; reordering/toggling/adding a section is admin content, not
+// a code change.
+model EmailTemplate {
+  id        String   @id @default(cuid())
+  // "confirmation" | "edit_link" | "reminder" | "digest" — one template
+  // per kind, unique. See EMAIL_KINDS in
+  // src/lib/validations/email-template.ts.
+  kind      String   @unique
+  subject   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sections EmailTemplateSection[]
+}
+
+// One block within a template. `type`: "hero_banner" | "greeting" |
+// "rich_text" | "image" | "collection_cards" | "product_cards" |
+// "cta_button" | "footer" | "countdown" — see EMAIL_SECTION_TYPES in
+// src/lib/validations/email-template.ts. `show` is the per-section ☑/☐
+// toggle; `data`'s shape is per-type, same "validated at the application
+// boundary" precedent as PageSection.data.
+model EmailTemplateSection {
+  id         String        @id @default(cuid())
+  templateId String
+  template   EmailTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  type       String
+  show       Boolean       @default(true)
+  sortOrder  Int           @default(0)
+  data       Json
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
 }
 
 // --- Purchase & Analytics Dashboards (Sprint 3.5) ---

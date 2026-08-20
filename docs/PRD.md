@@ -66,6 +66,25 @@ the new `lastNotifiedStatus`, `isNew`) once every send has actually been
 attempted — not at Generate time as before. A new `EmailLog` table (§4.7g)
 is the Email Queue every real send goes through, backing two new admin
 screens: Email Logs (§2.22.4) and a Notification Dashboard (§2.22.5).
+**10.0** (Email Template Manager & Consistent Variant Rendering):
+generalizes the Newsletter's admin-editable structure to cover all four
+email kinds — Confirmation, Retrieve My Pre-order, Reminder, Newsletter
+— from one Email Template Manager (§2.23), the same open
+`type: String` + `data: Json` section architecture Sprint 4's Event
+Pages CMS already proved, applied to email instead of web pages. Every
+section (Hero Banner, Greeting, Rich Text, Image, Collection Cards,
+Product Cards, CTA Button, Footer, Countdown) is independently
+show/hide-toggleable, reorderable, and editable with no code change —
+`EmailDigest` slims down to a pure send-operation record, and one
+generic `GenericEmail.tsx` renderer replaces the four previously fixed
+template files. Also fixes a real bug: the Confirmation Email never
+showed a chosen variant at all; `OrderItem` now permanently snapshots
+`variantGroupName` alongside the existing `variantName`, read through
+one shared `getOrderItemOptions()` helper (§17) used consistently across
+the Confirmation Email, Retrieve My Pre-order Email, Admin Orders, the
+Customer Self-Service Portal, and the Purchase Dashboard — deliberately
+returning an array so a future multi-option-group product needs no
+call-site changes.
 **Scope of this document:** Every claim below is derived from reading the
 actual source code, database schema, and migrations in this repository.
 Nothing here describes a feature that is not already implemented. Where
@@ -578,36 +597,47 @@ checkout page's rendered output. An empty/untouched editor
 an empty paragraph, so the checkout page simply doesn't render the block
 when nothing's been written.
 
-### 2.16 Email Communication System (Sprint 3; real sending as of Sprint 6)
+### 2.16 Email Communication System (Sprint 3; real sending as of Sprint 6; admin-editable structure as of §2.23)
 
 Built in Sprint 3 as a complete template system, admin authoring/preview
 experience, and architecture for sending — with no real provider wired up
-and nothing ever actually leaving the server. **Sprint 6 (§2.22) is what
-actually connects it**: a real `resendEmailService`, every template
-routed through a new Email Queue, and every trigger point (checkout,
-"Retrieve My Pre-order," the Notification Centre's Send Update, an
-automatic 24h-before-close Reminder) now really fires. The rest of this
-section (§2.16.1–2.16.4) still describes the underlying template system
-exactly as built in Sprint 3, since it needed no changes — see §2.22 for
-what actually sends and when.
+and nothing ever actually leaving the server. Sprint 6 (§2.22) connected
+it to a real provider. **As of §2.23's Email Template Manager, the four
+fixed template files this section originally described
+(`ConfirmationEmail.tsx`/`EditLinkEmail.tsx`/`ReminderEmail.tsx`/
+`UpdateEmail.tsx`) no longer exist** — replaced by one generic
+`GenericEmail.tsx` renderer driven by an admin-editable `EmailTemplate`
+row per kind. The Email Design System components below (§2.16.1) are
+unchanged and still exactly what every template is built from; §2.16.2's
+description of "three/four templates" is now historical — see §2.23 for
+the current, generalized structure.
 
 #### 2.16.1 Email Design System
 
-`src/lib/email/components/` — eight independent, reusable components, all
+`src/lib/email/components/` — nine independent, reusable components, all
 plain React returning `<tr>`-level fragments (no JSX assumptions about
 their parent beyond "inside an email `<table>`"), so any template can mix
 and match them:
 
 | Component | Renders |
 |---|---|
-| `Header` | Centered logo (`SiteSettings.logoUrl`, text-wordmark fallback) + event title (`SiteSettings.eventName`) |
-| `HeroBanner` | One configurable image (`SiteSettings.emailHeroImageUrl`/`emailHeroLinkUrl`) — renders nothing if unset |
+| `Header` | Centered logo (`SiteSettings.logoUrl`, text-wordmark fallback) + event title (`SiteSettings.eventName`) — not a section (§4.7h), every email always shows it |
+| `HeroBanner` | One configurable image, **post-Sprint-6** sourced from a `hero_banner` section's own `data.imageUrl`/`data.linkUrl` (§2.23.1), not `SiteSettings` — renders nothing if unset |
 | `Greeting` | "Hi {first name}," — first name only, via `getFirstName()` (§2.16.4) |
-| `KarenNotes` | Admin rich text, reusing the exact same Tiptap editor component as `preorderInfoHtml` (§2.15), just a different form field name |
+| `KarenNotes` | A `rich_text` section's admin-authored HTML, reusing the exact same Tiptap editor component as `preorderInfoHtml` (§2.15) |
+| `EmailImage` | **New post-Sprint-6.** A standalone `image` section — one photo, optional caption, optional link — distinct from `HeroBanner` so a template can carry more than one image |
 | `CollectionCard` | Square image + name, links to `/collections/[id]` |
-| `ProductCard` | Square photo, brand, name, price/"Price Coming Soon", 🟢/🟡/🔴 status (mirrors the Sprint 2 wishlist-drawer convention), links to `/product/[id]` — the **same** component instance backs Karen's Picks, New Products, *and* Price Updates, no duplicate layouts |
-| `CTAButton` | One large rounded pill button, configurable text + URL |
+| `ProductCard` | Square photo, brand, name, price/"Price Coming Soon", 🟢/🟡/🔴 status (mirrors the Sprint 2 wishlist-drawer convention), links to `/product/[id]` — the **same** component instance backs every `product_cards` marketing source, no duplicate layouts |
+| `CTAButton` | One large rounded pill button, configurable text + URL — **post-Sprint-6**, `url` may be the literal `{{edit_url}}` placeholder, substituted with the recipient's real edit link at render time (§2.23.2) |
 | `Footer` | Contact Us / Shipping Policy / Website / Instagram (all from `SiteSettings`' `email*` fields) + a per-recipient Unsubscribe link |
+
+Two more live in `src/lib/email/templates/` rather than `components/`,
+since each is bound to one specific data shape rather than being freely
+reusable: `OrderSummary` (an `order_items` `product_cards` section — an
+order's own line items, quantities, and — **post-Sprint-6** — each
+item's selected options via `getOrderItemOptions()`, §2.23.4) and
+`Countdown` (a `countdown` section — time remaining until
+`SiteSettings.countdownTargetAt`).
 
 Plus internal, non-shared plumbing: `ResponsiveCardGrid` (the fluid
 `inline-block`-column "3 desktop → 2 mobile" grid mechanic every card
@@ -616,12 +646,17 @@ grid uses, driven by one `.grid-col` media-query rule) and `EmailLayout`
 template wraps around its composed sections — not one of the 8 named
 components, just the wrapper they all sit inside).
 
-**Business logic / presentation split**: `src/lib/email/data/{confirmation,update,reminder}.ts`
-are pure functions that turn Prisma rows into plain-data props
-(`ConfirmationEmailData`, `UpdateEmailData`, `ReminderEmailData`) — no
-JSX. `src/lib/email/templates/*.tsx` only ever consume that plain data.
-When your Canva designs are ready, only the components/templates change;
-the data builders and every call site stay untouched.
+**Business logic / presentation split**: `src/lib/email/data/{confirmation,edit-link,reminder}.ts`
+each own one kind's own fetching (which order, which recipient, the
+countdown math) and end by calling the shared
+`src/lib/email/data/generic.ts`'s `resolveTemplateSections()` (§2.23.2),
+which turns that kind's admin-authored `EmailTemplateSection` rows into
+one plain `GenericEmailData` prop — no JSX anywhere in `data/`.
+`src/lib/email/templates/GenericEmail.tsx` only ever consumes that plain
+data. When your Canva designs are ready, only the components/template
+change; the data builders, the resolution engine, and every call site
+stay untouched — this is what "changing the layout shouldn't require
+backend changes" means concretely (§2.23).
 
 **New dependency**: `@react-email/render` (`render(reactElement) → Promise<string>`)
 — the only package installed. `@react-email/components` (a bundled
@@ -637,35 +672,33 @@ the `.grid-col` media query, so it always shows the 3-column desktop
 layout regardless of screen size there — a standard, accepted email-dev
 trade-off.
 
-#### 2.16.2 The three templates
+#### 2.16.2 The four email kinds
 
-- **Confirmation Email** (`ConfirmationEmail.tsx`) — Header, Greeting,
-  Order Summary (template-specific, not shared), CTA Button, Footer.
-  Dynamic fields: customer first name, order number, itemized order
-  summary + total, the Edit My Pre-order link/button. **Placeholder
-  layout** — no Canva design has been shared yet, per your answer;
-  swapping it in later only touches this file and `OrderSummary.tsx`.
-- **Update Email** (`UpdateEmail.tsx`) — the primary reusable
-  "here's what's new" email. Header, Hero Banner, Greeting, Karen's
-  Notes, Collection Cards, Product Card grids (Karen's Picks / New
-  Products / Price Updates — §2.16.3), CTA Button, Footer. Every optional
-  section only renders if its toggle is on *and* it has content.
-- **Reminder Email** (`ReminderEmail.tsx`) — Header, Greeting, Countdown
-  (template-specific, reuses `SiteSettings.countdownTargetAt`, the same
-  field the homepage's `EventInfoStrip` already shows), CTA Button,
-  Footer. Also a **placeholder layout**.
-- **Edit Link Email** (`EditLinkEmail.tsx`, new in Sprint 5) — Header,
-  Greeting, CTA Button (the edit link), Footer.
+Through Sprint 6 this subsection described four separate fixed template
+files (`ConfirmationEmail.tsx`, `UpdateEmail.tsx`, `ReminderEmail.tsx`,
+`EditLinkEmail.tsx`), each with its section list hardcoded in JSX. **Post-
+Sprint-6**, all four are `GenericEmail.tsx` rendering an admin-editable
+section list instead — see §2.23.1/2.23.2 for the mechanics and §2.23.5
+for exactly which sections each kind ships with by default (the same
+visual output this paragraph used to describe verbatim). In short:
 
-**As of Sprint 6** (§2.22), every one of these four templates has a real
-automatic trigger: Confirmation fires from `submitPreOrder` on checkout,
-Edit Link fires from `requestEditLink` (§2.6), Reminder fires from the
-new cron route 24 hours before `SiteSettings.countdownTargetAt`, and
-Update fires from the Notification Centre's real "Send Update." Through
-Sprint 5, none of that existed — this paragraph is kept only as a record
-of that history; `/admin/emails/confirmation` and `/admin/emails/reminder`
-(§2.16.3) remain useful as manual preview harnesses independent of the
-real triggers.
+- **Confirmation Email** (`kind: "confirmation"`) — Greeting, this
+  order's own items (Product Cards, `source: "order_items"`), CTA Button
+  (Edit My Pre-order), Footer.
+- **Retrieve My Pre-order / Edit Link Email** (`kind: "edit_link"`) —
+  same shape as Confirmation.
+- **Reminder Email** (`kind: "reminder"`) — Greeting, Countdown (reuses
+  `SiteSettings.countdownTargetAt`, the same field the homepage's
+  `EventInfoStrip` shows), CTA Button, Footer.
+- **Newsletter** (`kind: "digest"`) — Greeting, Hero Banner/Rich Text/
+  Collection Cards/Product Cards (Karen's Picks, New Products, Price
+  Updates, Sold Out — all admin-toggled, §2.23.3), CTA Button, Footer.
+
+Every one of these four has a real automatic trigger (§2.22): Confirmation
+fires from `submitPreOrder` on checkout, Edit Link fires from
+`requestEditLink` (§2.6), Reminder fires from the cron route 24 hours
+before `SiteSettings.countdownTargetAt`, and Newsletter fires from the
+Notification Centre's "Send Update."
 
 #### 2.16.3 Notification Centre (`/admin/emails`)
 
@@ -673,9 +706,12 @@ real triggers.
 as a single **current draft** `EmailDigest` row (the most recent one with
 `status` in `draft`/`generated`; created lazily on first visit, like
 `SiteSettings`' singleton pattern but with history preserved instead of a
-literal singleton id). The admin edits toggles, Karen's Notes, which
-Collections/products to feature, subject, and CTA text/URL — then clicks
-**Generate Email**, which:
+literal singleton id). **Post-Sprint-6**, the Notification Centre itself
+is purely operational — there's no form to fill in here anymore. Which
+sections show, Karen's Notes, Collections/products to feature, subject,
+and CTA text/URL are all edited once, structurally, at
+`/admin/emails/templates/digest` (§2.23.3), not per send. Clicking
+**Generate Email** here:
 
 1. Saves whatever's currently in the form onto the draft.
 2. Computes **New Products** (`Product.isNew: true`, active), **Price
@@ -691,8 +727,9 @@ Collections/products to feature, subject, and CTA text/URL — then clicks
    history stays accurate even after the product changes again.
 4. Computes `recipients` (every `PreOrder` with `unsubscribedAt: null`)
    and `recipientCount` — "prepare all required recipient data."
-5. Renders the final HTML (`renderUpdateEmail`) and saves it to
-   `renderedHtml`; sets `status: "generated"`.
+5. Resolves the current `EmailTemplate("digest")` (§2.23.2) and renders
+   the final HTML via `renderGenericEmail`, saving it to `renderedHtml`;
+   sets `status: "generated"`.
 
 **As of Sprint 6, Generate Email no longer advances
 `lastNotifiedPriceCents`** (or the new `lastNotifiedStatus`/`isNew`
@@ -725,9 +762,12 @@ multiple rows now accumulate over time, one per actual send. See
 `/admin/emails/logs` (§2.22.4) for the individual per-recipient sends
 behind any one "sent" row.
 
-`/admin/emails/confirmation` and `/admin/emails/reminder` are simple
-preview harnesses — pick any existing real `PreOrder` from a dropdown,
-render that template against it live. Nothing is persisted.
+**Retired post-Sprint-6**: `/admin/emails/confirmation` and
+`/admin/emails/reminder`, the two standalone preview harnesses that used
+to live here (pick a real `PreOrder`, render that template against it
+live). That capability now lives at `/admin/emails/templates/confirmation`
+and `/admin/emails/templates/reminder` (§2.23.3), alongside the section
+editor for the same kind instead of separate from it.
 
 #### 2.16.4 Supporting pieces
 
@@ -1286,6 +1326,139 @@ New env vars (`.env.example`): `EMAIL_DRIVER=resend` (unset/`"console"`
 for local dev, unchanged), `RESEND_API_KEY`, `EMAIL_FROM` (a verified
 Resend sender address), `CRON_SECRET`.
 
+### 2.23 Email Template Manager & Consistent Variant Rendering
+
+Generalizes §2.22.2's per-kind hard-wired structure to a single,
+admin-editable system covering all four email kinds — same open
+`type: String` + `data: Json` section architecture as Sprint 4's Event
+Pages CMS (§2.20.1), applied to email instead of web pages, and built by
+directly mirroring that CMS's Page Builder UI.
+
+#### 2.23.1 Data model
+
+Two new models: `EmailTemplate` (`id`, `kind` — `"confirmation"` |
+`"edit_link"` | `"reminder"` | `"digest"`, `@unique` — `subject`) and
+`EmailTemplateSection` (`id`, `templateId`, `type`, `show: Boolean`, the
+☑/☐ toggle, `sortOrder`, `data: Json`). Nine section types:
+**Hero Banner**, **Greeting**, **Rich Text**, **Image**,
+**Collection Cards**, **Product Cards**, **CTA Button**, **Footer**, and
+**Countdown** (a ninth addition beyond the original brief's list, folded
+into the same uniform system rather than staying a Reminder-only
+hardcoded exception). `Header` is deliberately *not* a section — every
+email always shows it, unconditionally, same as before.
+
+`EmailDigest` (§4.7b) slims down to a pure send-operation record
+(`status`, `renderedHtml`, `recipientCount`, `generatedAt`, `recipients`,
+`items`, `emailLogs`) — the fields that used to be template *structure*
+(`subject`, `karenNotesHtml`/six `show*` booleans, `ctaText`/`ctaUrl`,
+picked `collections`/`recommendedProducts`) moved to
+`EmailTemplate(kind: "digest")`'s sections, so there's one source of
+truth for "what's in my Newsletter," not two. `SiteSettings.emailHeroImageUrl`/
+`emailHeroLinkUrl` (Sprint 3, used only by the Newsletter) are retired —
+Hero Banner is now a real per-template section, uploaded the same way
+banner/product/collection images already are.
+
+`OrderItem` gains `variantGroupName String?` (§4.7), snapshotted
+alongside the existing `variantName` at every write site
+(`submitPreOrder`, `updateOrderItemVariant`, `moveWishlistItemToOrder`)
+— closes a real gap where the group label ("Design," "Colour," ...) had
+no permanent record, only a live join through `productId` that
+disappears once a product is deleted.
+
+#### 2.23.2 The section-resolution engine
+
+`src/lib/email/data/generic.ts`'s `resolveTemplateSections(kind, ctx)` is
+the shared core every kind's data builder ends with — loads the
+admin-authored `EmailTemplate`, filters to shown sections, and resolves
+each into concrete render props using whatever business-logic context
+(`ctx`) the caller already fetched. Each kind keeps its own thin builder
+(`buildConfirmationEmailData`, `buildEditLinkEmailData`,
+`buildReminderEmailData` — still owning "which order/countdown," never
+returning JSX); the Newsletter's `generateEmail`/`sendDigest`
+(`src/app/admin/(protected)/emails/actions.ts`) call it directly. One
+generic `GenericEmail.tsx` (`src/lib/email/templates/`) replaces the
+four previously fixed template files, switching on each resolved
+section's type to call the matching Design System component — a new
+`EmailImage` component (named to avoid a naming collision with
+`next/image`) joins the 8 from §2.16.1 for standalone images distinct
+from Hero Banner.
+
+**`product_cards`'s `data.source` is the fork between "marketing
+content" and "this recipient's own order."** `"manual"` (admin-picked),
+`"new_products"`/`"price_updates"`/`"sold_out"` (auto-computed, same
+functions §2.22.2 already used) render as a `ProductCard` grid, exactly
+like the old Newsletter sections did. `"order_items"` is new: it renders
+the *recipient's own* `OrderItem` rows via `OrderSummary.tsx` — name,
+variant options (§2.23.4), quantity, subtotal, total — the same shape
+Confirmation always used, now reusable by any kind. **The Retrieve My
+Pre-order template's default now includes this section, shown** —
+before this sprint it showed no items at all.
+
+A CTA Button's `url` may be the literal placeholder `{{edit_url}}`,
+substituted at render time with the recipient's own `/edit/{token}` link
+— lets Confirmation/Retrieve/Reminder's buttons stay per-recipient
+without a special-cased field; the Newsletter just uses a real URL
+instead, since it has no single recipient. A Confirmation subject may
+similarly include `{{order_number}}`, substituted by that kind's own
+builder.
+
+The Newsletter's per-recipient personalization (§2.22.3) is now a
+`resolveTemplateSections` call per recipient, with
+`excludeProductSources: ["new_products", "price_updates"]` populated per
+that recipient's own `notifyNewProducts`/`notifyPriceUpdates` — same
+behavior as before, expressed as a context filter instead of two
+hardcoded booleans.
+
+#### 2.23.3 Admin: `/admin/emails/templates`
+
+A list of the 4 kinds (section count + last updated) linking to
+`/admin/emails/templates/[kind]` — a Page-Builder-style editor
+mirroring Event Pages' exactly: drag-reorder, duplicate, delete,
+collapse/expand (`EmailTemplateSectionList.tsx` / `EmailSectionCard.tsx`
+= `PageSectionList.tsx` / `SectionCard.tsx`), plus one addition Event
+Pages sections never needed — a **Show/Hide** toggle pill in each card's
+header. A live preview sits alongside: for Confirmation/Retrieve/
+Reminder, pick any real recent order (same "preview against a real
+order" convention the old standalone preview pages used — those two
+pages are retired, folded in here); for the Newsletter, a placeholder-
+data preview, same convention as `/admin/emails`'s own.
+`/admin/emails` itself is now purely operational (Generate/Send/preview
+against whatever the Newsletter template currently says) — its former
+toggle-checkbox form moved entirely into the Template Manager.
+
+#### 2.23.4 Consistent variant rendering across 6 surfaces
+
+A new pure helper, `getOrderItemOptions()`
+(`src/lib/order-item-options.ts`), reads `{ variantName, variantGroupName }`
+and returns `{ label, value }[]` — **always an array**, even though
+today it's always 0 or 1 entries, so a future multi-option-group product
+(e.g. "Size: A5" *and* "Colour: Blue" on one line) only needs this one
+function to change, not a rewrite of every display site. Falls back to
+the generic label `"Variant"` only for a legacy row with a name but no
+group snapshot. A small shared component, `OrderItemOptions.tsx`
+(`src/components/shared/`), renders that array as one line per option
+for app-UI surfaces; email templates call the helper directly inline.
+
+Applied consistently, replacing every hardcoded `"Variant: {name}"`
+label, across: the Confirmation Email, the Retrieve My Pre-order Email
+(previously showed no items at all), the admin order detail page
+(`/admin/preorders/[id]`), the customer-facing order confirmation page
+(`/order/[orderNumber]` — fixed alongside its near-identical admin twin,
+though not explicitly named in the brief), the Self-Service Portal
+(`/edit/[token]`'s read-only fallback, when the live product/variant no
+longer exists), and the Purchase Dashboard (`PurchaseBuyingList.tsx` —
+previously showed no group label at all, just a bare variant name; its
+existing live product/variant join now also selects `variantGroupName`).
+
+#### 2.23.5 Seeding
+
+`scripts/seed-email-templates.mjs` (mirrors
+`scripts/apply-remote-migrations.mjs`'s env-var-driven, idempotent
+pattern) creates the 4 `EmailTemplate` rows with sections reproducing
+exactly what each email looked like before this sprint, so nothing
+visually changed until an admin edited something through the new
+builder. Safe to re-run — skips any kind that already has a row.
+
 ---
 
 ## 3. Screens (complete list, exactly as they behave today)
@@ -1311,12 +1484,12 @@ Resend sender address), `CRON_SECRET`.
 | Admin add banner | `/admin/banners/new` | Admin session required | `BannerForm` (create mode) |
 | Admin edit banner | `/admin/banners/[id]` | Admin session required | `BannerForm` (edit mode) + Delete |
 | Admin collections | `/admin/collections` | Admin session required | Tag list, inline square-image upload (§2.16.4) |
-| Admin Notification Centre | `/admin/emails` | Admin session required | Update Email draft editor + live preview + Generate Email + Send Update (§2.16.3, §2.22.2) |
+| Admin Notification Centre | `/admin/emails` | Admin session required | Newsletter live preview + Generate Email + Send Update, purely operational (§2.22.2, §2.23.3) |
 | Admin email history | `/admin/emails/history`, `/history/[id]` | Admin session required | Past generated/sent digests, read-only detail |
 | Admin Email Logs | `/admin/emails/logs` | Admin session required | Every attempted send, any status, with Retry (§2.22.4) |
 | Admin Notification Dashboard | `/admin/emails/dashboard` | Admin session required | Sent-today/pending/failed tiles, Daily Digest + Reminder history (§2.22.5) |
-| Admin Confirmation preview | `/admin/emails/confirmation` | Admin session required | Live preview against a real order |
-| Admin Reminder preview | `/admin/emails/reminder` | Admin session required | Live preview against a real order |
+| Admin Email Templates | `/admin/emails/templates` | Admin session required | List of the 4 email kinds, section count + last updated (§2.23.3) |
+| Admin Email Template Builder | `/admin/emails/templates/[kind]` | Admin session required | Page-Builder-style section editor (add/reorder/duplicate/delete/show-hide) + live preview (§2.23.3) — replaces the retired `/admin/emails/confirmation`/`/reminder` preview pages |
 | Admin settings | `/admin/settings` | Admin session required | Logo/event/countdown form + Email settings (§2.10, §2.16.4) |
 | Admin pre-order list | `/admin/preorders` | Admin session required | Pre-order table |
 | Admin pre-order detail | `/admin/preorders/[id]` | Admin session required | Full order detail |
@@ -1430,13 +1603,18 @@ reflected in the admin UI (the "+ Add banner" button hides at 5).
 | `eventName` / `eventLocation` / `eventInfo` | `String?` | All optional, shown in the homepage's event info strip |
 | `countdownTargetAt` | `DateTime?` | Optional — if unset, no countdown renders |
 | `preorderInfoHtml` | `String?` | **New in this pass** — admin-authored rich text (Tiptap), rendered above the checkout form; see §2.15 |
-| `emailHeroImageUrl` / `emailHeroLinkUrl` | `String?` | **New in Sprint 3** — the Update Email's one Hero Banner image + optional link (§2.16.1) |
 | `emailContactUrl` / `emailShippingPolicyUrl` / `emailWebsiteUrl` / `emailInstagramUrl` | `String?` | **New in Sprint 3** — admin-configurable email Footer links, independent of the site-wide `Footer.tsx` component (which stays hardcoded) |
 | `reminderBatchSentAt` | `DateTime?` | **New in Sprint 6** — guards the automatic Reminder Email batch (§2.22.6) against sending twice for the same `countdownTargetAt`. Reset to `null` by `updateSiteSettings` whenever `countdownTargetAt` itself changes |
 | `updatedAt` | `DateTime` | Auto-managed |
 
 Lazily created via `upsert` on first save (`updateSiteSettings`) — no
 migration-time seed row required.
+
+**Retired post-Sprint-6**: `emailHeroImageUrl`/`emailHeroLinkUrl` (the
+Update Email's one global Hero Banner). Hero Banner images are now
+per-template — each kind's own `hero_banner` section carries its own
+`imageUrl`/`linkUrl` in its `data` (§2.23.1, §4.7h), uploaded the same
+way as any other email image.
 
 ### 4.5 `Tag`
 
@@ -1476,6 +1654,7 @@ Sprint 1 (nullable `productId`/`SetNull`), plus two Sprint 3.5 additions
 |---|---|---|
 | `variantId` | `String?` | **New in Sprint 3.5** — FK → `ProductVariant.id`, `SetNull`. Live reference to which variant was ordered, if any |
 | `variantName` | `String?` | **New in Sprint 3.5** — permanent snapshot of the chosen variant's name (e.g. "Bear"), same reasoning as `productName` — so "Notebook / Design: Bear" still displays correctly even if the variant is later renamed or deleted |
+| `variantGroupName` | `String?` | **New post-Sprint-6** — permanent snapshot of the variant's *group* name (e.g. "Design"), alongside `variantName` above. Closes a gap where the group label had no permanent record, only a live join through `productId` that disappears once the product is deleted. Read together via `getOrderItemOptions()` (§2.23.4, `src/lib/order-item-options.ts`). |
 
 `PreOrder` itself gained:
 
@@ -1520,23 +1699,23 @@ rather than vanishing. Tied to `PreOrder`, not a new `Customer` entity, to
 keep today's accountless model intact — see the future-compatibility note
 in §16.
 
-### 4.7b `EmailDigest` / `EmailDigestItem` (new in Sprint 3)
+### 4.7b `EmailDigest` / `EmailDigestItem` (new in Sprint 3; slimmed post-Sprint-6)
 
-One prepared Update Email — see §2.16.3 for the full mechanics.
+One Newsletter **send-operation record** — see §2.22.2/§2.23.1 for the
+full mechanics. Through Sprint 6 this model also owned template
+*structure* (`subject`, `karenNotesHtml`, six `show*` booleans,
+`ctaText`/`ctaUrl`, picked `collections`/`recommendedProducts`) — as of
+§2.23, that structure moved to `EmailTemplate(kind: "digest")`'s
+sections (§4.7h), and those fields/relations were **removed** from this
+model.
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | `String` (cuid) | Primary key |
 | `status` | `String` | Default `"draft"` — `"draft"` \| `"generated"` \| `"sent"` (`"sent"` real as of Sprint 6, §2.22.2 — set by `sendDigest()`, at which point the row becomes immutable history) |
-| `subject` | `String` | Default `"Shokakko Australia — Latest Updates"` |
-| `karenNotesHtml` | `String?` | Same Tiptap-authored HTML pattern as `SiteSettings.preorderInfoHtml` |
-| `showKarenNotes` / `showCollections` / `showRecommended` / `showNewProducts` / `showPriceUpdates` / `showSoldOut` | `Boolean` | Section toggles, all default `false`. `showSoldOut` **new in Sprint 6** (§2.22.3) |
-| `ctaText` / `ctaUrl` | `String` | Defaults `"View New Products"` / `"/"` |
 | `renderedHtml` | `String?` | Saved by Generate Email — one representative preview render, not per-recipient (§2.16.3, §2.22.3) |
 | `recipientCount` | `Int?` | Through Sprint 5, set at generate time. **As of Sprint 6**, set by `sendDigest()` to the actual number of recipients sent to (personalization can skip a recipient — §2.22.3) |
 | `generatedAt` | `DateTime?` | Set by Generate Email |
-| `collections` | `Tag[]` | Admin-picked, implicit many-to-many |
-| `recommendedProducts` | `Product[]` | Admin-picked ("Karen's Picks"), implicit many-to-many |
 | `recipients` | `PreOrder[]` | Computed at generate time — every non-unsubscribed `PreOrder`. **As of Sprint 6**, `sendDigest()` re-queries this fresh at send time rather than trusting this snapshot, in case subscriptions changed between Generate and Send |
 | `items` | `EmailDigestItem[]` | Computed sections, snapshotted — see below |
 | `emailLogs` | `EmailLog[]` | **New in Sprint 6** — every per-recipient send attempt behind this digest, see §4.7g |
@@ -1648,6 +1827,31 @@ Indexed on `status` (the cron sweep's stuck-row query, §2.22.6) and
 `[template, sentAt]` (the Notification Dashboard's Reminder History
 grouping, §2.22.5).
 
+### 4.7h `EmailTemplate` / `EmailTemplateSection` (new post-Sprint-6)
+
+The Email Template Manager's data model — see §2.23.1 for the full
+reasoning, structurally identical to `EventPage`/`PageSection` (§4.7d/e).
+
+**`EmailTemplate`**
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `String` (cuid) | Primary key |
+| `kind` | `String` | `@unique` — `"confirmation"` \| `"edit_link"` \| `"reminder"` \| `"digest"` |
+| `subject` | `String` | May include a kind-specific placeholder (`{{order_number}}` for Confirmation) — substituted by that kind's own data builder |
+| `sections` | `EmailTemplateSection[]` | Ordered by `sortOrder` |
+
+**`EmailTemplateSection`**
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `String` (cuid) | Primary key |
+| `templateId` | `String` | FK → `EmailTemplate.id`, `onDelete: Cascade` |
+| `type` | `String` | `"hero_banner"` \| `"greeting"` \| `"rich_text"` \| `"image"` \| `"collection_cards"` \| `"product_cards"` \| `"cta_button"` \| `"footer"` \| `"countdown"` |
+| `show` | `Boolean` | Default `true` — the admin ☑/☐ toggle; a hidden section stays in the list but is skipped by `resolveTemplateSections()` |
+| `sortOrder` | `Int` | Default `0` |
+| `data` | `Json` | Per-type shape, validated at the application boundary (not by the DB) — same precedent as `PageSection.data` |
+
 ### 4.8 Migration history (Sprint 1's expand-then-contract sequence)
 
 Because the dev database already held **real data** by the time this
@@ -1706,19 +1910,24 @@ Product ──(one-to-many, cascade on delete)── ProductVariant
 Product ──(one-to-many, optional FK, SetNull on delete)── OrderItem
 Product ──(one-to-many, cascade on delete)── WishlistItem
 Product ──(one-to-many, optional FK, SetNull on delete)── EmailDigestItem
-Product ──(many-to-many)── EmailDigest (recommendedProducts)
 ProductVariant ──(one-to-many, optional FK, SetNull on delete)── OrderItem
 ProductVariant ──(one-to-many, optional FK, SetNull on delete)── WishlistItem
-Tag ──(many-to-many)── EmailDigest (collections)
 PreOrder ──(one-to-many, cascade on delete)── OrderItem
 PreOrder ──(one-to-many, cascade on delete)── WishlistItem
 PreOrder ──(one-to-many, cascade on delete)── OrderHistoryEntry
 PreOrder ──(many-to-many)── EmailDigest (recipients)
 EmailDigest ──(one-to-many, cascade on delete)── EmailDigestItem
 EventPage ──(one-to-many, cascade on delete)── PageSection
+EmailTemplate ──(one-to-many, cascade on delete)── EmailTemplateSection
 HeroBanner, SiteSettings, OrderSequence, ActivityLog — standalone, no FKs
   (ActivityLog.productId is a plain nullable string, not a real FK)
 ```
+
+`Product`'s and `Tag`'s former many-to-many relations to `EmailDigest`
+(`recommendedProducts`/`collections`) are gone post-Sprint-6 — that
+content now lives as plain `productIds`/`collectionIds` arrays inside
+`EmailTemplate("digest")`'s `product_cards`/`collection_cards` sections'
+`data` (§2.23.1, §4.7h), not as a database relation.
 
 Still no `User`/`Customer`/`Account` table — the admin identity remains a
 single shared password in an environment variable, and the cart remains
@@ -1749,14 +1958,17 @@ itself. Everything else below remains a Server Action.
 | `updatePreOrderStatus` | `admin/(protected)/preorders/actions.ts` | `requireAdmin()` | Updates `PreOrder.status` |
 | `submitPreOrder` | `app/order/actions.ts` | None (public) | Validates, **new post-Sprint-6** — rejects the submission (a field error on Email) if any non-`cancelled` `PreOrder` already exists for that exact email address, pointing the customer at My Pre-order instead (§2.2) — re-fetches products **and variants** server-side, generates the next sequential order number and a secure `editToken`, creates the order (snapshotting each item's variant, §2.17) + wishlist migration (§2.3), sets the `shokakko_preorder_token` cookie, feeds `ActivityLog` (`order_submitted`) and — **new in Sprint 5** — `OrderHistoryEntry` (`order_created`) — and **new in Sprint 6** — a best-effort automatic Confirmation Email via `sendTrackedEmail` (§2.22.2) |
 | `toggleWishlistItem` | `components/wishlist/actions.ts` | None (public — scoped by the caller's cookie-derived token, not a login) | **New in Sprint 2**, extended in Sprint 3.5 with an optional `variantId` parameter. Looks up the `PreOrder` by `editToken`, no-ops silently if not found, otherwise creates/deletes the matching `WishlistItem` row (validating the variant actually belongs to the product first) and, on create, feeds `ActivityLog` (`wishlist_added`, §2.19). Called by `WishlistContext` once a wishlist is in linked mode (§2.3), and — **new in Sprint 5** — reused directly by the Self-Service Portal's wishlist Remove button (§2.21), no wrapper needed |
-| `generateEmail` | `admin/(protected)/emails/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Saves the Notification Centre form onto the current draft `EmailDigest`, computes/snapshots New Products + Price Updates + (**new in Sprint 6**) Sold Out, computes recipients, renders + saves `renderedHtml` (§2.16.3). **As of Sprint 6**, no longer advances `lastNotifiedPriceCents` (moved to `sendDigest`, below) and never calls `emailService.send()` itself |
-| `sendDigest` | same file | `requireAdmin()` | **New in Sprint 6.** The real "Send Update" — requires a `generated` draft, loops every non-unsubscribed recipient with per-recipient personalization, sends via `sendTrackedEmail`, then advances every "mark as published" checkpoint and sets `status: "sent"` (§2.22.2) |
+| `generateEmail` | `admin/(protected)/emails/actions.ts` | `requireAdmin()` | **New in Sprint 3, simplified post-Sprint-6.** No longer parses a form — there's no structural input left to submit. Computes/snapshots New Products + Price Updates + Sold Out into `EmailDigestItem`, resolves the current `EmailTemplate("digest")` via `resolveTemplateSections()` (§2.23.2), renders + saves `renderedHtml` (§2.16.3) |
+| `sendDigest` | same file | `requireAdmin()` | **New in Sprint 6, personalization rebuilt post-Sprint-6.** Requires a `generated` draft, loops every non-unsubscribed recipient, resolves `"digest"` sections per recipient with `excludeProductSources` set from that recipient's `notifyNewProducts`/`notifyPriceUpdates` prefs (§2.23.2), skips recipients whose resolved sections carry no content, sends via `sendTrackedEmail`, then advances every "mark as published" checkpoint and sets `status: "sent"` (§2.22.2) |
 | `retryEmailLog` | same file | `requireAdmin()` | **New in Sprint 6.** Re-runs the Email Queue's worker step (`processEmailLog`) on one existing `EmailLog` row — the Email Logs page's Retry button (§2.22.4) |
 | `updateTagImage` | `admin/(protected)/collections/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Uploads/removes a `Tag`'s square Collection Card image |
 | `updatePurchaseStatus` | `admin/(protected)/purchases/actions.ts` | `requireAdmin()` | **New in Sprint 3.5.** Updates `Product.purchaseStatus` or `ProductVariant.purchaseStatus` (whichever applies) for one Buying List row (§2.18) |
 | `createEventPage` / `updateEventPage` / `deleteEventPage` | `admin/(protected)/event-pages/actions.ts` | `requireAdmin()` | **New in Sprint 4.** `EventPage` CRUD — slug uniqueness/reserved-word checks on create, slug locked + delete refused for `PROTECTED_SLUGS` (§2.20.2) |
 | `addSection` / `deleteSection` / `duplicateSection` / `reorderSections` | same file | `requireAdmin()` | **New in Sprint 4.** Section list management — `reorderSections` mirrors `reorderBanners`' one-`$transaction`-of-index-updates shape exactly (§2.20.3) |
 | `updateTextSection` / `updateImageSection` / `updateGallerySection` / `updateButtonSection` | same file | `requireAdmin()` | **New in Sprint 4.** One dedicated, per-type-validated action per section type — image/gallery variants upload via `storage.save`, run new files through `compressImageFile` (§2.20.4) |
+| `findOrCreateTemplate` / `updateTemplateSubject` | `admin/(protected)/emails/templates/actions.ts` | `requireAdmin()` | **New post-Sprint-6.** `EmailTemplate` lookup-or-create by `kind`, and its subject-line editor (§2.23.3) |
+| `addSection` / `deleteSection` / `duplicateSection` / `reorderSections` / `toggleSectionShow` | same file | `requireAdmin()` | **New post-Sprint-6.** Mirrors Event Pages' section-list actions above exactly, plus `toggleSectionShow` for the ☑ Show / ☐ Hide pill — `deleteSection` also cleans up any uploaded image for `hero_banner`/`image` sections (§2.23.3) |
+| `updateHeroBannerSection` / `updateRichTextSection` / `updateImageSection` / `updateCollectionCardsSection` / `updateProductCardsSection` / `updateCtaButtonSection` | same file | `requireAdmin()` | **New post-Sprint-6.** One dedicated, per-type-validated action per `EmailTemplateSection` type — `greeting`/`footer`/`countdown` sections have nothing to save, so no action exists for them (§2.23.3) |
 | `requestEditLink` | `app/my-preorders/actions.ts` | None (public) | **New in Sprint 5.** Looks up the most recent `PreOrder` by email, sends the Edit Link Email if found via `sendTrackedEmail` (**as of Sprint 6** — was the raw `EmailService` through Sprint 5) — always returns the identical message regardless of outcome (§2.6) |
 | `linkBrowserToOrder` | `app/edit/[token]/actions.ts` | None (public — token-scoped, same bearer model as `toggleWishlistItem`) | **New in Sprint 5.** Called once on mount by `LinkBrowserOnMount.tsx`; sets the `shokakko_preorder_token` cookie so this browser's `WishlistContext` switches into linked mode against this order (§2.21) |
 | `updateOrderItemQuantity` / `updateOrderItemVariant` / `removeOrderItem` | same file | None (public, token-scoped) | **New in Sprint 5.** Re-fetches live product/variant data server-side on every change (never trusts client price/name data); each logs one `OrderHistoryEntry` |
@@ -1845,13 +2057,24 @@ src/
 │           │   ├── TextSectionEditor.tsx, ImageSectionEditor.tsx,
 │           │   │   GallerySectionEditor.tsx, ButtonSectionEditor.tsx
 │           │   └── EventSectionRichTextEditor.tsx  Wider Tiptap editor (§2.20.4)
-│           ├── emails/              NEW (Sprint 3) — Notification Centre:
-│           │   ├── page.tsx           draft editor + live preview
-│           │   ├── NotificationCentreForm.tsx
-│           │   ├── actions.ts         findOrCreateCurrentDraft, generateEmail
+│           ├── emails/              NEW (Sprint 3), simplified post-Sprint-6 —
+│           │   │                     Notification Centre, purely operational now:
+│           │   ├── page.tsx           live preview + Generate Email / Send Update
+│           │   ├── NotificationCentreForm.tsx   No more toggles/Karen's Notes/CTA fields
+│           │   ├── actions.ts         findOrCreateCurrentDraft, generateEmail, sendDigest
 │           │   ├── history/           past digests list + [id] read-only detail
-│           │   ├── confirmation/      Confirmation Email preview (pick an order)
-│           │   └── reminder/          Reminder Email preview (pick an order)
+│           │   ├── logs/, dashboard/  Unchanged (§2.22.4/2.22.5)
+│           │   └── templates/         NEW post-Sprint-6 — Email Template Manager (§2.23.3):
+│           │       ├── page.tsx         4 kind cards (confirmation/edit_link/reminder/digest)
+│           │       ├── [kind]/page.tsx  Section editor + live preview (replaces the
+│           │       │                     retired confirmation/ and reminder/ preview pages)
+│           │       ├── actions.ts       Template + section CRUD, one update*Section
+│           │       │                     action per type, toggleSectionShow
+│           │       ├── EmailTemplateSectionList.tsx, EmailSectionCard.tsx
+│           │       └── HeroBannerSectionEditor.tsx, RichTextSectionEditor.tsx,
+│           │           ImageSectionEditor.tsx, CollectionCardsSectionEditor.tsx,
+│           │           ProductCardsSectionEditor.tsx, CTAButtonSectionEditor.tsx,
+│           │           TemplateSubjectForm.tsx
 │           ├── settings/            + PreorderInfoEditor.tsx (Tiptap);
 │           │                         + Email settings section (Sprint 3)
 │           └── preorders/           + shows a "{Variant group}: {Variant}" line
@@ -1926,25 +2149,37 @@ src/
     ├── catalog.ts                    Shared Prisma-row → CatalogProduct mapper;
     │                                  + variants mapping (Sprint 3.5)
     ├── storage/                      Unchanged interface, more call sites
-    ├── email/                        NEW (Sprint 3) — see §2.16
+    ├── email/                        NEW (Sprint 3) — see §2.16; templates
+    │   │                              generalized post-Sprint-6, see §2.23
     │   ├── types.ts, console.ts, index.ts   EmailService interface + no-op driver
     │   ├── site-url.ts               Absolute-URL helpers (edit/product/
     │   │                              collection/unsubscribe links, footer links)
     │   ├── first-name.ts             getFirstName()
-    │   ├── render.ts                 renderConfirmationEmail/renderUpdateEmail/
-    │   │                              renderReminderEmail/renderEditLinkEmail (Sprint 5)
-    │   ├── components/                The 8-component Email Design System +
+    │   ├── render.ts                 Collapsed post-Sprint-6 to one function,
+    │   │                              renderGenericEmail(data: GenericEmailData)
+    │   ├── components/                The 9-component Email Design System +
     │   │   │                          brand.ts, ResponsiveCardGrid, EmailLayout
     │   │   ├── Header.tsx, HeroBanner.tsx, Greeting.tsx, KarenNotes.tsx
+    │   │   ├── EmailImage.tsx         NEW post-Sprint-6 — a standalone `image` section
     │   │   ├── CollectionCard.tsx, ProductCard.tsx, CTAButton.tsx, Footer.tsx
     │   │   └── ResponsiveCardGrid.tsx, EmailLayout.tsx, brand.ts
     │   ├── data/                      Business-logic layer — Prisma rows → plain props
-    │   │   ├── confirmation.ts, update.ts, reminder.ts
-    │   │   └── edit-link.ts           NEW (Sprint 5) — buildEditLinkEmailData()
-    │   └── templates/                 Presentation layer — compose the 8 components
-    │       ├── ConfirmationEmail.tsx, UpdateEmail.tsx, ReminderEmail.tsx
-    │       ├── EditLinkEmail.tsx      NEW (Sprint 5) — Header/Greeting/CTAButton/Footer
-    │       └── OrderSummary.tsx, Countdown.tsx   (template-specific, not shared)
+    │   │   ├── generic.ts             NEW post-Sprint-6 — the shared section-resolution
+    │   │   │                          engine, resolveTemplateSections() (§2.23.2); every
+    │   │   │                          builder below ends by calling into this
+    │   │   ├── confirmation.ts, edit-link.ts, reminder.ts   Thin per-kind wrappers —
+    │   │   │                          fetch this kind's own data, call generic.ts
+    │   │   └── update.ts              Trimmed post-Sprint-6 — buildUpdateEmailData()
+    │   │                              removed; keeps + exports toProductCardData/
+    │   │                              toCollectionCardData and the New/Price/SoldOut
+    │   │                              candidate computers, now called from generic.ts
+    │   └── templates/                 Presentation layer — compose the Design System
+    │       ├── GenericEmail.tsx       NEW post-Sprint-6 — replaces the 4 fixed
+    │       │                          template files (§2.23.1); switches on each
+    │       │                          resolved section's type
+    │       └── OrderSummary.tsx, Countdown.tsx   (bound to one data shape, not shared —
+    │                                  OrderSummary now renders each item's selected
+    │                                  options via getOrderItemOptions(), §2.23.4)
     └── validations/
         ├── product.ts                 type/status; PRODUCT_STATUSES union;
         │                               + isNew field (Sprint 3);
@@ -1961,10 +2196,13 @@ src/
         ├── banner.ts
         ├── settings.ts                + preorderInfoHtml field;
         │                               + email settings fields (Sprint 3)
-        ├── email-digest.ts            NEW (Sprint 3) — Notification Centre form schema
         ├── event-page.ts              NEW (Sprint 4) — SECTION_TYPES, RESERVED_SLUGS,
         │                               PROTECTED_SLUGS, slugSchema, eventPageFormSchema,
         │                               per-section-type data schemas (§2.20)
+        ├── email-template.ts          NEW post-Sprint-6, replaces the removed
+        │                               email-digest.ts — EMAIL_KINDS, EMAIL_SECTION_TYPES,
+        │                               per-section-type data schemas, PRODUCT_CARDS_SOURCES,
+        │                               EDIT_URL_PLACEHOLDER (§2.23.1)
         ├── order-history.ts           NEW (Sprint 5) — ORDER_HISTORY_TYPES,
         │                               ORDER_HISTORY_TYPE_LABELS (§2.11, §2.21)
         ├── edit-link.ts                NEW (Sprint 5) — requestEditLinkSchema (§2.6)
@@ -2454,10 +2692,10 @@ New or changed in Sprint 3:
 17. **`/unsubscribe/[token]` performs a write on a GET request** — the
     one exception to this app's Server-Actions-only mutation pattern,
     unavoidable for an email-client-clicked link (§5/§11).
-18. **Collections aren't curated automatically** — the Update Email's
+18. **Collections aren't curated automatically** — the Newsletter's
     Collection Cards section shows only the tags an admin explicitly
-    picks in the Notification Centre (mirroring how Recommended Products
-    already works), not every tag in the database. Some seed/test data
+    picks in the Email Template Manager (**post-Sprint-6**, was the
+    Notification Centre; §2.23.3), not every tag in the database. Some seed/test data
     tags (e.g. stray lowercase duplicates from early testing) have no
     square image yet and would need one added at `/admin/collections`
     before looking right in a real send.
@@ -2568,10 +2806,13 @@ excluded on purpose:
   per-recipient personalized rendering is real, not just supported
   (§2.22.3).
 - **Real Canva-designed Confirmation and Reminder templates** — Sprint 3
-  shipped placeholder layouts for both; still placeholders as of Sprint
-  6, since a real send existing doesn't by itself require a new design.
-  You'll share the Canva exports in a future sprint and only the
-  `components`/`templates` files need to change to adopt them (§2.16.1).
+  shipped placeholder layouts for both; still placeholders as of this
+  sprint. **Post-Sprint-6, this is now explicitly what the Email Template
+  Manager was built to support** (§2.23) — swapping in a Canva visual
+  layer only ever touches the Design System `components/` files (and
+  possibly `GenericEmail.tsx`'s per-type switch), never the data
+  builders, the resolution engine, or any Server Action. You'll share the
+  Canva exports in a future sprint.
 - ~~**Wishlist/Pre-order-targeted digest recipients**~~ — the
   *preference*-based half (New Products/Price Updates/Reminder,
   §2.21/§2.22.3) is **built in Sprint 6**. Still not built: narrowing
@@ -2785,19 +3026,27 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
   Self-Service Portal URL (real as of Sprint 5, §2.21), and, new in
   Sprint 3, the `{token}` in every email's `/unsubscribe/{token}` Footer
   link (§2.16.4).
-- **Email Design System**: the 8 independent, reusable components
-  (Header, Hero Banner, Greeting, Karen's Notes, Collection Card, Product
-  Card, CTA Button, Footer) every email template is composed from
+- **Email Design System**: the 9 independent, reusable components
+  (Header, Hero Banner, Greeting, Karen's Notes, Email Image, Collection
+  Card, Product Card, CTA Button, Footer) every email is composed from
   (§2.16.1) — `src/lib/email/components/`.
+- **Email Template Manager**: the admin area (`/admin/emails/templates`,
+  **post-Sprint-6**) where each of the 4 email kinds' `EmailTemplate`
+  section list is authored — add/reorder/duplicate/delete/show-hide, same
+  interaction as the Event Pages Page Builder (§2.23.3). This is the
+  layer that makes email "layout" a database edit, not a code change.
 - **Notification Centre**: the admin screen (`/admin/emails`) for
-  preparing the Update Email — one **current draft** `EmailDigest` at a
-  time, refined over the course of a day, finalized by clicking
-  **Generate Email** (§2.16.3).
-- **Digest** / **`EmailDigest`**: one prepared Update Email — its section
-  toggles, Karen's Notes, picked Collections/Recommended Products,
+  actually sending the Newsletter — **post-Sprint-6**, purely operational
+  (Generate Email / Send Update against whatever the Email Template
+  Manager's `"digest"` template currently says); structural editing moved
+  to the Email Template Manager above (§2.16.3).
+- **Digest** / **`EmailDigest`**: one *send operation* of the Newsletter —
   computed New Products/Price Updates/Sold Out, recipient list, and saved
-  rendered HTML, all as one database row (§4.7b). `status` moves
-  `"draft"` → `"generated"` → `"sent"`; only the last is immutable
+  rendered HTML, all as one database row (§4.7b). **Post-Sprint-6**, its
+  structure (section toggles, Karen's Notes, picked Collections/products)
+  is no longer stored here — that's `EmailTemplate("digest")`'s sections
+  (§4.7h) — `EmailDigest` only records that one send happened. `status`
+  moves `"draft"` → `"generated"` → `"sent"`; only the last is immutable
   history (§2.22.2).
 - **`EmailService`**: the swappable send interface
   (`src/lib/email/types.ts`) every email provider implements — same role
@@ -2817,6 +3066,14 @@ Not scoped, not committed — carried over from PRD v1.0 and extended:
   (§2.17, §4.1a). Not the same concept as "Product Type" or "Product
   Collection" — those are catalogue taxonomy, a variant is a specific
   purchasable option *within* one product listing.
+- **`getOrderItemOptions()`**: the one shared helper (`src/lib/order-item-
+  options.ts`, **post-Sprint-6**) every surface calls to render an
+  `OrderItem`'s selected variant consistently — Confirmation Email,
+  Retrieve My Pre-order Email, Admin Orders, the Self-Service Portal, and
+  the Purchase Dashboard all call it instead of hardcoding the word
+  "Variant" (§2.23.4). Always returns an array of `{label, value}` pairs
+  (today 0-or-1 entries), so a future multi-option-group product (e.g.
+  Size *and* Colour on one line) is additive here only.
 - **Buying List**: the Purchase Dashboard's core table — every distinct
   product/variant combination that appears in at least one submitted
   pre-order, with requested quantity, customer count, and a purchase

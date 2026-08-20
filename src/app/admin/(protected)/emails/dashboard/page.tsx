@@ -105,7 +105,7 @@ export default async function NotificationDashboardPage() {
                         href={`/admin/emails/history/${digest.id}`}
                         className="truncate text-sm font-semibold hover:underline"
                       >
-                        {digest.subject}
+                        Newsletter
                       </Link>
                       <p className="text-xs text-ink-soft">
                         {digest.recipientCount ?? 0} recipient{digest.recipientCount === 1 ? "" : "s"}

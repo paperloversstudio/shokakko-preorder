@@ -3,7 +3,7 @@
 import { db } from "@/lib/db";
 import { sendTrackedEmail } from "@/lib/email/queue";
 import { buildEditLinkEmailData } from "@/lib/email/data/edit-link";
-import { renderEditLinkEmail } from "@/lib/email/render";
+import { renderGenericEmail } from "@/lib/email/render";
 import { requestEditLinkSchema } from "@/lib/validations/edit-link";
 import { flattenZodError } from "@/lib/validations/utils";
 
@@ -58,7 +58,7 @@ async function sendEditLinkEmail(order: {
 }): Promise<void> {
   const data = await buildEditLinkEmailData(order);
   if (!data) return; // no editToken — pre-Sprint-2 order, nothing to link to
-  const html = await renderEditLinkEmail(data);
+  const html = await renderGenericEmail(data);
   await sendTrackedEmail({
     to: order.customerEmail,
     subject: data.subject,

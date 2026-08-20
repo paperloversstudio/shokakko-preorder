@@ -10,7 +10,7 @@ import { orderFormSchema } from "@/lib/validations/order";
 import { flattenZodError } from "@/lib/validations/utils";
 import { sendTrackedEmail } from "@/lib/email/queue";
 import { buildConfirmationEmailData } from "@/lib/email/data/confirmation";
-import { renderConfirmationEmail } from "@/lib/email/render";
+import { renderGenericEmail } from "@/lib/email/render";
 
 export type OrderSubmitState = {
   error?: string;
@@ -171,6 +171,7 @@ export async function submitPreOrder(
         productBrand: product.brand,
         productSku: product.sku,
         variantName: variant?.name ?? null,
+        variantGroupName: variant ? product.variantGroupName : null,
         unitPriceCents: variant?.priceCentsOverride ?? product.priceCents,
       };
     })
@@ -262,7 +263,7 @@ export async function submitPreOrder(
   await buildConfirmationEmailData(order.orderNumber)
     .then((data) => {
       if (!data) return;
-      return renderConfirmationEmail(data).then((html) =>
+      return renderGenericEmail(data).then((html) =>
         sendTrackedEmail({
           to: order.customerEmail,
           subject: data.subject,

@@ -1,31 +1,17 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import {
-  computeNewProductCandidates,
-  computePriceUpdateCandidates,
-  computeSoldOutCandidates,
-  buildUpdateEmailData,
-} from "@/lib/email/data/update";
-import { renderUpdateEmail } from "@/lib/email/render";
+import { resolveTemplateSections } from "@/lib/email/data/generic";
+import { renderGenericEmail } from "@/lib/email/render";
+import { buildFooterLinks } from "@/lib/email/site-url";
 import { findOrCreateCurrentDraft } from "./actions";
 import { NotificationCentreForm } from "./NotificationCentreForm";
 
 export default async function NotificationCentrePage() {
-  const draft = await findOrCreateCurrentDraft();
-
-  const [newProducts, priceUpdates, soldOutProducts, recipientCount, tags, products] = await Promise.all([
-    computeNewProductCandidates(),
-    computePriceUpdateCandidates(),
-    computeSoldOutCandidates(),
+  const [draft, recipientCount, settings] = await Promise.all([
+    findOrCreateCurrentDraft(),
     db.preOrder.count({ where: { unsubscribedAt: null } }),
-    db.tag.findMany({ orderBy: { name: "asc" } }),
-    db.product.findMany({
-      where: { status: "active" },
-      orderBy: { name: "asc" },
-      include: { images: { orderBy: { sortOrder: "asc" }, take: 1 } },
-    }),
+    db.siteSettings.findUnique({ where: { id: "singleton" } }),
   ]);
-  const priceUpdateProducts = priceUpdates.map((p) => p.product);
 
   // Once a digest has been generated at least once, show exactly what was
   // saved rather than a fresh live recompute — Generate Email can itself
@@ -34,11 +20,20 @@ export default async function NotificationCentrePage() {
   // after generating would show a *different*, already-moved-on state
   // than what was actually captured. Before any generate, there's nothing
   // saved yet, so the live recompute is the only preview available.
-  const previewHtml = draft.renderedHtml
-    ? draft.renderedHtml
-    : await renderUpdateEmail(
-        await buildUpdateEmailData(draft, newProducts, priceUpdateProducts, soldOutProducts),
-      );
+  let previewHtml = draft.renderedHtml;
+  if (!previewHtml) {
+    const logoUrl = settings?.logoUrl ?? null;
+    const eventName = settings?.eventName ?? null;
+    const footerLinks = await buildFooterLinks(settings, null);
+    const { subject, sections } = await resolveTemplateSections("digest", {
+      firstName: "there",
+      logoUrl,
+      eventName,
+      footerLinks,
+      editUrl: null,
+    });
+    previewHtml = await renderGenericEmail({ subject, firstName: "there", logoUrl, eventName, footerLinks, sections });
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -46,11 +41,17 @@ export default async function NotificationCentrePage() {
         <div>
           <h1 className="font-display text-2xl font-bold">Notification Centre</h1>
           <p className="text-sm text-ink-soft">
-            Prepare the Update Email — collect changes throughout the day,
+            Prepare the Newsletter — collect changes throughout the day,
             then generate one digest when you&apos;re ready.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1">
+          <Link
+            href="/admin/emails/templates"
+            className="rounded-pill px-3 py-1.5 text-sm font-semibold hover:bg-mint/50"
+          >
+            Email Templates →
+          </Link>
           <Link
             href="/admin/emails/history"
             className="rounded-pill px-3 py-1.5 text-sm font-semibold hover:bg-mint/50"
@@ -75,34 +76,8 @@ export default async function NotificationCentrePage() {
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
         <div className="rounded-card bg-white p-6 shadow-sm shadow-ink/5">
           <NotificationCentreForm
-            draft={{
-              subject: draft.subject,
-              karenNotesHtml: draft.karenNotesHtml ?? "",
-              showKarenNotes: draft.showKarenNotes,
-              showCollections: draft.showCollections,
-              showRecommended: draft.showRecommended,
-              showNewProducts: draft.showNewProducts,
-              showPriceUpdates: draft.showPriceUpdates,
-              showSoldOut: draft.showSoldOut,
-              ctaText: draft.ctaText,
-              ctaUrl: draft.ctaUrl,
-              status: draft.status,
-              generatedAt: draft.generatedAt ? draft.generatedAt.toISOString() : null,
-            }}
-            collectionOptions={tags.map((t) => ({
-              id: t.id,
-              name: t.name,
-              selected: draft.collections.some((c) => c.id === t.id),
-            }))}
-            productOptions={products.map((p) => ({
-              id: p.id,
-              name: p.name,
-              brand: p.brand,
-              selected: draft.recommendedProducts.some((r) => r.id === p.id),
-            }))}
-            newProductCount={newProducts.length}
-            priceUpdateCount={priceUpdateProducts.length}
-            soldOutCount={soldOutProducts.length}
+            status={draft.status}
+            generatedAt={draft.generatedAt ? draft.generatedAt.toISOString() : null}
             recipientCount={recipientCount}
           />
         </div>
@@ -121,7 +96,7 @@ export default async function NotificationCentrePage() {
             customers&apos; copies may be shorter than this preview.
           </p>
           <iframe
-            title="Update Email preview"
+            title="Newsletter preview"
             srcDoc={previewHtml}
             className="h-[700px] w-full rounded-card border border-line bg-white"
           />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Field, inputClass } from "@/components/ui/Field";
 import { updateSiteSettings, type SettingsFormState } from "./actions";
@@ -13,8 +14,6 @@ type SettingsDefaults = {
   eventInfo: string;
   countdownTargetAt: string;
   preorderInfoHtml: string;
-  emailHeroImageUrl: string | null;
-  emailHeroLinkUrl: string;
   emailContactUrl: string;
   emailShippingPolicyUrl: string;
   emailWebsiteUrl: string;
@@ -27,8 +26,6 @@ export function SettingsForm({ defaults }: { defaults: SettingsDefaults }) {
   const [state, formAction, pending] = useActionState(updateSiteSettings, initialState);
   const [preview, setPreview] = useState<string | null>(defaults.logoUrl);
   const [removeLogo, setRemoveLogo] = useState(false);
-  const [heroPreview, setHeroPreview] = useState<string | null>(defaults.emailHeroImageUrl);
-  const [removeHeroImage, setRemoveHeroImage] = useState(false);
   const errors = state.fieldErrors ?? {};
 
   return (
@@ -156,68 +153,16 @@ export function SettingsForm({ defaults }: { defaults: SettingsDefaults }) {
       <div className="border-t border-line pt-5">
         <h2 className="font-display text-lg font-bold">Email settings</h2>
         <p className="mt-1 text-sm text-ink-soft">
-          Used by the Update, Confirmation, and Reminder emails (Notification
-          Centre) — independent of the website&apos;s own header/footer above.
+          Footer links shared by every email template — independent of the
+          website&apos;s own header/footer above. Each template&apos;s own
+          content (Hero Banner, Rich Text, Product Cards, ...) is managed
+          from the{" "}
+          <Link href="/admin/emails/templates" className="underline hover:text-ink">
+            Email Template Manager
+          </Link>
+          .
         </p>
       </div>
-
-      <Field
-        label="Email hero banner"
-        htmlFor="emailHeroImage"
-        hint="The Update Email's one hero image — shown at the top, below the logo. Optional."
-      >
-        <div className="flex items-center gap-4">
-          <div className="flex h-16 w-32 items-center justify-center overflow-hidden rounded-xl border border-dashed border-line bg-mint/30">
-            {heroPreview && !removeHeroImage ? (
-              // eslint-disable-next-line @next/next/no-img-element -- local/blob preview URLs
-              <img src={heroPreview} alt="" className="h-full max-w-full object-contain" />
-            ) : (
-              <span className="text-xs text-ink-soft">No image</span>
-            )}
-          </div>
-          <div className="flex flex-col gap-2">
-            <input
-              id="emailHeroImage"
-              name="emailHeroImage"
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/gif"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  setHeroPreview(URL.createObjectURL(file));
-                  setRemoveHeroImage(false);
-                }
-              }}
-              className="text-sm"
-            />
-            {defaults.emailHeroImageUrl && (
-              <label className="flex items-center gap-2 text-sm text-ink-soft">
-                <input
-                  type="checkbox"
-                  name="removeEmailHeroImage"
-                  checked={removeHeroImage}
-                  onChange={(e) => setRemoveHeroImage(e.target.checked)}
-                />
-                Remove current hero image
-              </label>
-            )}
-          </div>
-        </div>
-      </Field>
-
-      <Field
-        label="Email hero link (optional)"
-        htmlFor="emailHeroLinkUrl"
-        error={errors.emailHeroLinkUrl}
-        hint="Where the hero image links to, if anywhere."
-      >
-        <input
-          id="emailHeroLinkUrl"
-          name="emailHeroLinkUrl"
-          defaultValue={defaults.emailHeroLinkUrl}
-          className={inputClass}
-        />
-      </Field>
 
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Email footer — Contact Us" htmlFor="emailContactUrl" error={errors.emailContactUrl}>

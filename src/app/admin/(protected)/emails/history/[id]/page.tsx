@@ -9,11 +9,7 @@ export default async function EmailHistoryDetailPage({
   const { id } = await params;
   const digest = await db.emailDigest.findUnique({
     where: { id },
-    include: {
-      collections: true,
-      recommendedProducts: true,
-      items: true,
-    },
+    include: { items: true },
   });
   if (!digest) notFound();
 
@@ -30,7 +26,7 @@ export default async function EmailHistoryDetailPage({
         >
           ← Back to history
         </Link>
-        <h1 className="mt-1 font-display text-2xl font-bold">{digest.subject}</h1>
+        <h1 className="mt-1 font-display text-2xl font-bold">Newsletter — {digest.status}</h1>
         <p className="text-sm text-ink-soft">
           Status: {digest.status}
           {digest.recipientCount !== null &&
@@ -45,21 +41,23 @@ export default async function EmailHistoryDetailPage({
 
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
         <div className="flex flex-col gap-4 rounded-card bg-white p-6 shadow-sm shadow-ink/5">
-          <h2 className="font-display font-bold">What was included</h2>
-          <ul className="flex flex-col gap-1 text-sm text-ink-soft">
-            <li>Karen&apos;s Notes: {digest.showKarenNotes ? "Shown" : "Hidden"}</li>
-            <li>
-              Collections: {digest.showCollections ? "Shown" : "Hidden"} (
-              {digest.collections.map((c) => c.name).join(", ") || "none picked"})
-            </li>
-            <li>
-              Karen&apos;s Picks: {digest.showRecommended ? "Shown" : "Hidden"} (
-              {digest.recommendedProducts.map((p) => p.name).join(", ") || "none picked"})
-            </li>
-            <li>New Products: {digest.showNewProducts ? "Shown" : "Hidden"}</li>
-            <li>Price Updates: {digest.showPriceUpdates ? "Shown" : "Hidden"}</li>
-            <li>Sold Out: {digest.showSoldOut ? "Shown" : "Hidden"}</li>
-          </ul>
+          <h2 className="font-display font-bold">What was captured</h2>
+          <p className="text-sm text-ink-soft">
+            The structure this digest used (which sections were shown,
+            Karen&apos;s Notes, etc.) lives in the{" "}
+            <Link href="/admin/emails/templates/digest" className="underline hover:text-ink">
+              Newsletter template
+            </Link>{" "}
+            — this saved render below shows exactly what was sent.
+            Automatically-computed New Products/Price Updates/Sold Out
+            captured for this specific send:
+          </p>
+
+          {newItems.length === 0 && priceItems.length === 0 && soldOutItems.length === 0 && (
+            <p className="text-sm text-ink-soft">
+              Nothing automatically-computed was captured for this send.
+            </p>
+          )}
 
           {newItems.length > 0 && (
             <div>
@@ -104,7 +102,7 @@ export default async function EmailHistoryDetailPage({
           <h2 className="font-display text-lg font-bold">Saved render</h2>
           {digest.renderedHtml ? (
             <iframe
-              title={`${digest.subject} — saved render`}
+              title={`Newsletter ${digest.status} — saved render`}
               srcDoc={digest.renderedHtml}
               className="h-[700px] w-full rounded-card border border-line bg-white"
             />

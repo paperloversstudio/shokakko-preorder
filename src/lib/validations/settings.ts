@@ -10,7 +10,6 @@ export const siteSettingsFormSchema = z.object({
   // comment on SiteSettings.preorderInfoHtml for the sanitization approach.
   preorderInfoHtml: z.string().optional(),
   // --- Email settings (Sprint 3) ---
-  emailHeroLinkUrl: z.string().trim().max(500).optional(),
   emailContactUrl: z.string().trim().max(500).optional(),
   emailShippingPolicyUrl: z.string().trim().max(500).optional(),
   emailWebsiteUrl: z.string().trim().max(500).optional(),

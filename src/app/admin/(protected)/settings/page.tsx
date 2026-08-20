@@ -31,8 +31,6 @@ export default async function AdminSettingsPage() {
               ? toDatetimeLocalValue(settings.countdownTargetAt)
               : "",
             preorderInfoHtml: settings?.preorderInfoHtml ?? "",
-            emailHeroImageUrl: settings?.emailHeroImageUrl ?? null,
-            emailHeroLinkUrl: settings?.emailHeroLinkUrl ?? "",
             emailContactUrl: settings?.emailContactUrl ?? "",
             emailShippingPolicyUrl: settings?.emailShippingPolicyUrl ?? "",
             emailWebsiteUrl: settings?.emailWebsiteUrl ?? "",

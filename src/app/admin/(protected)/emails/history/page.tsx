@@ -24,7 +24,7 @@ export default async function EmailHistoryPage() {
         </Link>
         <h1 className="mt-1 font-display text-2xl font-bold">Email History</h1>
         <p className="text-sm text-ink-soft">
-          Every Update Email ever generated. One entry keeps updating each
+          Every Newsletter ever generated. One entry keeps updating each
           time you click &quot;Generate Email&quot; until you click
           &quot;Send Update&quot; — a sent digest becomes immutable history
           and the next Generate starts a fresh row. See{" "}
@@ -38,7 +38,7 @@ export default async function EmailHistoryPage() {
       {digests.length === 0 ? (
         <p className="rounded-card bg-white p-8 text-center text-ink-soft shadow-sm shadow-ink/5">
           Nothing generated yet — head to the Notification Centre to
-          prepare your first Update Email.
+          prepare your first Newsletter.
         </p>
       ) : (
         <ul className="flex flex-col gap-3">
@@ -55,7 +55,7 @@ export default async function EmailHistoryPage() {
                       href={`/admin/emails/history/${digest.id}`}
                       className="font-display font-bold hover:underline"
                     >
-                      {digest.subject}
+                      Newsletter
                     </Link>
                     <Badge tone={badge.tone}>{badge.label}</Badge>
                   </div>

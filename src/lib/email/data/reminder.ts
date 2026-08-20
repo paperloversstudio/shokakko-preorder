@@ -1,27 +1,13 @@
 import "server-only";
 import { db } from "@/lib/db";
 import { buildEditUrl, buildFooterLinks } from "../site-url";
-import type { FooterLinks } from "../components/Footer";
+import { resolveTemplateSections, type GenericEmailData } from "./generic";
 
-export type ReminderEmailData = {
-  subject: string;
-  firstName: string;
-  // Computed here (business logic), not in the Countdown component
-  // (presentation) — how much time is left as of render time, in
-  // milliseconds. Null if no countdown target is configured.
-  countdownRemainingMs: number | null;
-  ctaText: string;
-  ctaUrl: string;
-  logoUrl: string | null;
-  eventName: string | null;
-  footerLinks: FooterLinks;
-};
-
-/** Pure data-layer builder for <ReminderEmail> — same separation as
+/** Pure data-layer builder for the Reminder Email — same separation as
  * confirmation.ts. `countdownTargetAt` reuses SiteSettings' existing
  * countdown field (already shown on the homepage's EventInfoStrip), not a
  * new setting. */
-export async function buildReminderEmailData(orderNumber: string): Promise<ReminderEmailData | null> {
+export async function buildReminderEmailData(orderNumber: string): Promise<GenericEmailData | null> {
   const [order, settings] = await Promise.all([
     db.preOrder.findUnique({ where: { orderNumber } }),
     db.siteSettings.findUnique({ where: { id: "singleton" } }),
@@ -29,17 +15,28 @@ export async function buildReminderEmailData(orderNumber: string): Promise<Remin
   if (!order) return null;
 
   const editUrl = order.editToken ? await buildEditUrl(order.editToken) : null;
+  const footerLinks = await buildFooterLinks(settings, order.editToken);
+  const logoUrl = settings?.logoUrl ?? null;
+  const eventName = settings?.eventName ?? null;
+  const countdownRemainingMs = settings?.countdownTargetAt
+    ? settings.countdownTargetAt.getTime() - Date.now()
+    : null;
+
+  const { subject, sections } = await resolveTemplateSections("reminder", {
+    firstName: order.customerFirstName,
+    logoUrl,
+    eventName,
+    footerLinks,
+    editUrl,
+    countdownRemainingMs,
+  });
 
   return {
-    subject: "Reminder: your Shokakko Australia pre-order closes soon",
+    subject,
     firstName: order.customerFirstName,
-    countdownRemainingMs: settings?.countdownTargetAt
-      ? settings.countdownTargetAt.getTime() - Date.now()
-      : null,
-    ctaText: "Edit My Pre-order",
-    ctaUrl: editUrl ?? "/",
-    logoUrl: settings?.logoUrl ?? null,
-    eventName: settings?.eventName ?? null,
-    footerLinks: await buildFooterLinks(settings, order.editToken),
+    logoUrl,
+    eventName,
+    footerLinks,
+    sections,
   };
 }

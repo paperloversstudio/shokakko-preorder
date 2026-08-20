@@ -1,11 +1,11 @@
 /**
  * Email Design System — Hero Banner.
- * One configurable image (`SiteSettings.emailHeroImageUrl`/
- * `emailHeroLinkUrl`, admin-editable) — distinct from the homepage's
- * rotating multi-banner `HeroBanner` model, since the email only ever
- * shows one. Templates that don't use it (Confirmation, Reminder) simply
- * don't render this component — renders nothing itself if no image is
- * configured, so it's always safe to include.
+ * One configurable image, admin-editable per `EmailTemplate` via its own
+ * `hero_banner` section (post-Sprint-6's Email Template Manager) —
+ * distinct from the homepage's rotating multi-banner `HeroBanner` model,
+ * since one email only ever shows one at a time. A template that doesn't
+ * include this section simply never resolves one — renders nothing
+ * itself if no image is configured, so it's always safe to include.
  */
 export function HeroBanner({
   imageUrl,

@@ -7,12 +7,14 @@ import {
   type PurchaseStatus,
 } from "@/lib/validations/purchase";
 import { updatePurchaseStatus } from "./actions";
+import { getOrderItemOptions } from "@/lib/order-item-options";
 
 export type BuyingListRow = {
   productId: string;
   variantId: string | null;
   productName: string;
   variantName: string | null;
+  variantGroupName: string | null;
   brand: string;
   type: string | null;
   status: "active" | "draft" | "sold_out";
@@ -35,6 +37,15 @@ function rowKey(row: Pick<BuyingListRow, "productId" | "variantId">): string {
   return `${row.productId}::${row.variantId ?? ""}`;
 }
 
+/** "{Group}: {Value}" instead of a bare variant name — never a hardcoded
+ * label. Joined with ", " on the rare chance getOrderItemOptions() ever
+ * returns more than one option. */
+function variantLabel(row: Pick<BuyingListRow, "variantName" | "variantGroupName">): string {
+  return getOrderItemOptions(row)
+    .map((o) => `${o.label}: ${o.value}`)
+    .join(", ");
+}
+
 function toCsv(rows: BuyingListRow[]): string {
   const header = [
     "Product",
@@ -51,7 +62,7 @@ function toCsv(rows: BuyingListRow[]): string {
   const lines = rows.map((r) =>
     [
       r.productName,
-      r.variantName ?? "",
+      variantLabel(r),
       r.brand,
       r.type ?? "",
       PRODUCT_STATUS_LABELS[r.status] ?? r.status,
@@ -308,7 +319,7 @@ export function PurchaseBuyingList({ rows }: { rows: BuyingListRow[] }) {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">{row.productName}</p>
                   {row.variantName && (
-                    <p className="text-xs text-ink-soft">{row.variantName}</p>
+                    <p className="text-xs text-ink-soft">{variantLabel(row)}</p>
                   )}
                   <p className="text-xs text-ink-soft">
                     Qty {row.requestedQuantity} · {row.customerCount} customer
@@ -337,7 +348,7 @@ export function PurchaseBuyingList({ rows }: { rows: BuyingListRow[] }) {
                 {visible.map((row) => (
                   <tr key={rowKey(row)}>
                     <td className="px-4 py-3 font-semibold">{row.productName}</td>
-                    <td className="px-4 py-3 text-ink-soft">{row.variantName ?? "—"}</td>
+                    <td className="px-4 py-3 text-ink-soft">{row.variantName ? variantLabel(row) : "—"}</td>
                     <td className="px-4 py-3 text-ink-soft">{row.brand}</td>
                     <td className="px-4 py-3 text-right tabular-nums">{row.requestedQuantity}</td>
                     <td className="px-4 py-3 text-right tabular-nums">{row.customerCount}</td>

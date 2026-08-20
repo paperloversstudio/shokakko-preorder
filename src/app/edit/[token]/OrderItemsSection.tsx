@@ -4,6 +4,8 @@ import { useState, useTransition } from "react";
 import { formatPrice } from "@/lib/validations/product";
 import { VariantPills } from "@/components/catalog/VariantPills";
 import { QuantitySelector } from "@/components/catalog/QuantitySelector";
+import { OrderItemOptions } from "@/components/shared/OrderItemOptions";
+import { getOrderItemOptions } from "@/lib/order-item-options";
 import type { CatalogVariant } from "@/components/catalog/types";
 import { updateOrderItemQuantity, updateOrderItemVariant, removeOrderItem } from "./actions";
 
@@ -18,6 +20,7 @@ export type PortalOrderItem = {
   unitPriceCents: number | null;
   imageUrl: string | null;
   variantGroupName: string | null;
+  snapshotVariantGroupName: string | null;
   variants: CatalogVariant[];
 };
 
@@ -63,8 +66,14 @@ function ItemRow({ token, item }: { token: string; item: PortalOrderItem }) {
             />
           </div>
         )}
-        {!item.variantGroupName && item.variantName && (
-          <p className="mt-1 text-xs font-semibold text-ink-soft">Variant: {item.variantName}</p>
+        {!item.variantGroupName && (
+          <OrderItemOptions
+            options={getOrderItemOptions({
+              variantName: item.variantName,
+              variantGroupName: item.snapshotVariantGroupName,
+            })}
+            className="mt-1 text-xs font-semibold text-ink-soft"
+          />
         )}
       </div>
 

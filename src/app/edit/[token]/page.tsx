@@ -88,7 +88,13 @@ export default async function EditPreOrderPage({
       variantName: item.variantName,
       unitPriceCents: item.unitPriceCents,
       imageUrl: variant?.imageUrl ?? item.product?.images[0]?.url ?? null,
+      // Live group name — drives whether the editable VariantPills show
+      // (only meaningful while the product/its variants still exist).
       variantGroupName: item.product?.variantGroupName ?? null,
+      // Permanent snapshot — read only when the live one above is
+      // unavailable (product deleted), so the read-only fallback label
+      // still shows the real group name instead of a generic one.
+      snapshotVariantGroupName: item.variantGroupName,
       variants: (item.product?.variants ?? []).map((v) => ({
         id: v.id,
         name: v.name,

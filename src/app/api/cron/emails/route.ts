@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { retryEmailLog, sendTrackedEmail } from "@/lib/email/queue";
 import { buildReminderEmailData } from "@/lib/email/data/reminder";
-import { renderReminderEmail } from "@/lib/email/render";
+import { renderGenericEmail } from "@/lib/email/render";
 
 // This project's first API route (Sprint 6). Called by Vercel Cron (see
 // vercel.json) — Vercel sends `Authorization: Bearer ${CRON_SECRET}`
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
     for (const recipient of recipients) {
       const data = await buildReminderEmailData(recipient.orderNumber);
       if (!data) continue;
-      const html = await renderReminderEmail(data);
+      const html = await renderGenericEmail(data);
       await sendTrackedEmail({
         to: recipient.customerEmail,
         subject: data.subject,

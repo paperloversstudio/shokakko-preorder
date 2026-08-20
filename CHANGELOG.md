@@ -2,6 +2,72 @@
 
 Notable changes to the Shokakko Australia pre-order site, newest first.
 
+## Email Template Manager & Consistent Variant Rendering (2026-08-21)
+
+Generalizes the Newsletter's admin-editable structure to all four email
+kinds, and fixes a real display bug: the Confirmation Email dropped
+variant information entirely, and two other surfaces hardcoded the
+literal word "Variant" instead of the product's real option-group name.
+Mirrors Sprint 4's Event Pages CMS pattern (`type` + `data: Json`
+sections, drag-reorder Page Builder) applied to email templates instead
+of pages. See PRD §2.23 for full details.
+
+### Added
+
+- **Email Template Manager** (`/admin/emails/templates`) — every
+  outgoing email (Confirmation, Retrieve My Pre-order, Reminder,
+  Newsletter) is now built from an admin-editable section list instead
+  of a fixed `.tsx` file. Add/reorder/duplicate/delete/show-hide
+  sections per email kind — Hero Banner, Greeting, Rich Text, Image,
+  Collection Cards, Product Cards, CTA Button, Footer, Countdown — each
+  with its own ☑ Show / ☐ Hide toggle, plus a live preview against a
+  real order.
+- **Consistent variant rendering everywhere an order line shows up** —
+  Confirmation Email, Retrieve My Pre-order Email, Admin Orders, the
+  Self-Service Portal, the Purchase Dashboard, and the customer-facing
+  order confirmation page all now render an item's selected options the
+  same way, e.g. "Creative TIS Passport Blank Notebook / Design: A /
+  Qty: 1", using the product's real option-group name — never hardcoded
+  as "Variant". Built to support multiple option groups on one line in
+  the future (e.g. "Size: A5 / Colour: Blue"), though today's schema
+  still carries one group per product.
+- **The Confirmation Email now shows the order's items at all** — it
+  previously showed only quantities with no product identity beyond the
+  name, and dropped variant selection completely.
+- **Retrieve My Pre-order Email now shows the order's items** —
+  previously showed none.
+- `OrderItem.variantGroupName` — a permanent snapshot of the option
+  group's name (e.g. "Design"), alongside the existing `variantName`
+  snapshot, so a customer's selection stays correctly labeled even if
+  the product or variant is later deleted.
+
+### Changed
+
+- **Business logic/presentation split, strengthened**: a new shared
+  `resolveTemplateSections()` engine turns an admin-authored section
+  list into render props; every email kind's data builder ends by
+  calling it. No template file queries the database; no data builder
+  returns JSX. Swapping in a future Canva-designed visual layer will
+  only ever touch the Design System component files, never a Server
+  Action or data builder.
+- The Notification Centre (`/admin/emails`) is now purely operational —
+  Generate Email / Send Update against whatever the Template Manager's
+  Newsletter template currently says. Its old toggle checkboxes, Karen's
+  Notes editor, and CTA fields moved to `/admin/emails/templates/digest`.
+- Hero Banner is now per-template (each kind's own section), not a
+  single site-wide image in Settings.
+
+### Removed
+
+- The four fixed email template files (`ConfirmationEmail.tsx`,
+  `EditLinkEmail.tsx`, `ReminderEmail.tsx`, `UpdateEmail.tsx`) — replaced
+  by one generic `GenericEmail.tsx` renderer.
+- The two standalone Confirmation/Reminder preview pages
+  (`/admin/emails/confirmation`, `/admin/emails/reminder`) — folded into
+  the Template Manager's per-kind editor + preview.
+- `SiteSettings.emailHeroImageUrl`/`emailHeroLinkUrl` — superseded by
+  per-template Hero Banner sections.
+
 ## Post-Sprint-6 fixes (2026-08-21)
 
 ### Added

@@ -67,6 +67,7 @@ export default async function PurchaseDashboardPage() {
         variantId: variant?.id ?? null,
         productName: product.name,
         variantName: variant?.name ?? null,
+        variantGroupName: variant ? product.variantGroupName : null,
         brand: product.brand,
         type: product.type,
         status: product.status as "active" | "draft" | "sold_out",
