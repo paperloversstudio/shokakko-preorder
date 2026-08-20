@@ -124,6 +124,24 @@ export async function submitPreOrder(
     };
   }
 
+  // One pre-order per email address — same case-sensitive exact match as
+  // /my-preorders' lookup (§2.6), so "does an order exist" is answered
+  // consistently everywhere. A cancelled order doesn't count — an admin
+  // cancelling an order is exactly what should free that email up to
+  // submit a fresh one.
+  const existingOrder = await db.preOrder.findFirst({
+    where: { customerEmail: values.customerEmail, status: { not: "cancelled" } },
+    select: { id: true },
+  });
+  if (existingOrder) {
+    return {
+      fieldErrors: {
+        customerEmail:
+          "An order already exists for this email address. Visit My Pre-order to view or edit it.",
+      },
+    };
+  }
+
   // Re-fetch current product data server-side — never trust client-submitted
   // names/prices, since products may have changed since the page loaded.
   // Sold-out/draft products can't be ordered even if a stale client

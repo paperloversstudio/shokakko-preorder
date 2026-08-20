@@ -2,6 +2,31 @@
 
 Notable changes to the Shokakko Australia pre-order site, newest first.
 
+## Post-Sprint-6 fixes (2026-08-21)
+
+### Added
+
+- **One pre-order per email address** — checkout now rejects a
+  submission (with a clear message on the Email field) if a non-cancelled
+  order already exists for that email, instead of silently creating a
+  duplicate. Points the customer at My Pre-order to view/edit their
+  existing order. A cancelled order doesn't block a fresh submission.
+- **"In your pre-order:" label** on the Product Details page's quantity
+  stepper — a bare −/+ control with no context, for an item already
+  added, read as if the "Add to Pre-order" button had disappeared.
+
+### Fixed
+
+- **The Sprint 6 deployment never actually went live** — `vercel.json`'s
+  hourly cron schedule violated the Vercel Hobby plan's once-daily cron
+  limit, which Vercel enforces at deploy time. This silently blocked
+  every deployment for the project (not just the cron itself) with no
+  visible error until manually triggering a deployment through Vercel's
+  dashboard surfaced the real message. Fixed by changing the schedule to
+  once daily; also required reconnecting the GitHub↔Vercel integration
+  (its webhook had also stopped firing) and re-authorizing the Vercel
+  GitHub App's repository access.
+
 ## Sprint 6 — Communication Platform (2026-08-20)
 
 Connects the Email Architecture (Sprint 3), the Self-Service Portal

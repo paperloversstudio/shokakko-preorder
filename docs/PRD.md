@@ -236,6 +236,20 @@ Composed in `src/app/page.tsx` (Server Component, `force-dynamic` — see
   server-side (never trusts client-submitted prices/names), generates the
   next sequential order number (§2.7), creates the `PreOrder` + `OrderItem`
   rows, and redirects to `/order/[orderNumber]`.
+- **One pre-order per email address** (added post-Sprint-6, in response
+  to a real customer submitting duplicates) — before creating anything,
+  `submitPreOrder` checks for an existing `PreOrder` with that exact
+  `customerEmail` and any `status` other than `"cancelled"`. If one
+  exists, the submission is rejected with a field error on Email ("An
+  order already exists for this email address. Visit My Pre-order to
+  view or edit it.") rather than creating a second order — the customer
+  is pointed at the existing Self-Service Portal/Retrieve flow (§2.6,
+  §2.21) instead of duplicating. The match is exact/case-sensitive, same
+  precedent as `/my-preorders`' own lookup (§14 item 23) — kept
+  consistent rather than introducing a second, differently-behaved email
+  comparison. Excluding `cancelled` orders is deliberate: an admin
+  cancelling an order is exactly what should free that email up to
+  submit a fresh one.
 - **Cart clearing**: a small client component, `ClearCartOnMount`, mounted
   only on the order confirmation page, calls `clearCart()` once on mount.
   This is deliberate — `submitPreOrder` redirects server-side on success, so
@@ -1733,7 +1747,7 @@ itself. Everything else below remains a Server Action.
 | `reorderBanners` | same file | `requireAdmin()` | Batch `sortOrder` update from a drag-and-drop reorder |
 | `updateSiteSettings` | `admin/(protected)/settings/actions.ts` | `requireAdmin()` | Upserts the `SiteSettings` singleton, now including `preorderInfoHtml`. **As of Sprint 6**, also resets `reminderBatchSentAt` back to `null` whenever `countdownTargetAt` itself changes, re-arming the Reminder Email guard (§2.22.6) |
 | `updatePreOrderStatus` | `admin/(protected)/preorders/actions.ts` | `requireAdmin()` | Updates `PreOrder.status` |
-| `submitPreOrder` | `app/order/actions.ts` | None (public) | Validates, re-fetches products **and variants** server-side, generates the next sequential order number and a secure `editToken`, creates the order (snapshotting each item's variant, §2.17) + wishlist migration (§2.3), sets the `shokakko_preorder_token` cookie, feeds `ActivityLog` (`order_submitted`) and — **new in Sprint 5** — `OrderHistoryEntry` (`order_created`) — and **new in Sprint 6** — a best-effort automatic Confirmation Email via `sendTrackedEmail` (§2.22.2) |
+| `submitPreOrder` | `app/order/actions.ts` | None (public) | Validates, **new post-Sprint-6** — rejects the submission (a field error on Email) if any non-`cancelled` `PreOrder` already exists for that exact email address, pointing the customer at My Pre-order instead (§2.2) — re-fetches products **and variants** server-side, generates the next sequential order number and a secure `editToken`, creates the order (snapshotting each item's variant, §2.17) + wishlist migration (§2.3), sets the `shokakko_preorder_token` cookie, feeds `ActivityLog` (`order_submitted`) and — **new in Sprint 5** — `OrderHistoryEntry` (`order_created`) — and **new in Sprint 6** — a best-effort automatic Confirmation Email via `sendTrackedEmail` (§2.22.2) |
 | `toggleWishlistItem` | `components/wishlist/actions.ts` | None (public — scoped by the caller's cookie-derived token, not a login) | **New in Sprint 2**, extended in Sprint 3.5 with an optional `variantId` parameter. Looks up the `PreOrder` by `editToken`, no-ops silently if not found, otherwise creates/deletes the matching `WishlistItem` row (validating the variant actually belongs to the product first) and, on create, feeds `ActivityLog` (`wishlist_added`, §2.19). Called by `WishlistContext` once a wishlist is in linked mode (§2.3), and — **new in Sprint 5** — reused directly by the Self-Service Portal's wishlist Remove button (§2.21), no wrapper needed |
 | `generateEmail` | `admin/(protected)/emails/actions.ts` | `requireAdmin()` | **New in Sprint 3.** Saves the Notification Centre form onto the current draft `EmailDigest`, computes/snapshots New Products + Price Updates + (**new in Sprint 6**) Sold Out, computes recipients, renders + saves `renderedHtml` (§2.16.3). **As of Sprint 6**, no longer advances `lastNotifiedPriceCents` (moved to `sendDigest`, below) and never calls `emailService.send()` itself |
 | `sendDigest` | same file | `requireAdmin()` | **New in Sprint 6.** The real "Send Update" — requires a `generated` draft, loops every non-unsubscribed recipient with per-recipient personalization, sends via `sendTrackedEmail`, then advances every "mark as published" checkpoint and sets `status: "sent"` (§2.22.2) |
