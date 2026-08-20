@@ -163,10 +163,15 @@ export function ProductDetailsView({ product }: { product: CatalogProduct }) {
                   Add to Pre-order
                 </button>
               ) : (
-                <QuantitySelector
-                  value={quantity}
-                  onChange={(qty) => cart.setQuantity(cartKey, qty)}
-                />
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-ink-soft">
+                    In your pre-order:
+                  </span>
+                  <QuantitySelector
+                    value={quantity}
+                    onChange={(qty) => cart.setQuantity(cartKey, qty)}
+                  />
+                </div>
               ))}
           </div>
         </div>
